@@ -8,13 +8,14 @@ const PORT = process.env.PORT || 3000;
 
 // ---------------- CONFIG ----------------
 const COINS = [
-  { id: "bitcoin", symbol: "BTC" },
-  { id: "ethereum", symbol: "ETH" }
+  { id: "bitcoin", symbol: "₿ BTC", emoji: "₿" },
+  { id: "ethereum", symbol: "Ξ ETH", emoji: "Ξ" }
 ];
 
 const lastSignal = {};
+let isRunning = false;
 
-// ---------------- KEEP SERVER ALIVE ----------------
+// ---------------- WEB SERVER (Render) ----------------
 app.get("/", (req, res) => {
   res.send("RSI Bot is running...");
 });
@@ -36,56 +37,73 @@ async function sendMessage(text) {
   }
 }
 
-// ---------------- COINGECKO PRICE HISTORY ----------------
-async function getPrices(coinId) {
-  const res = await axios.get(
-    `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart`,
-    {
-      params: {
-        vs_currency: "usd",
-        days: "5",
-        interval: "hourly"
-      },
-      timeout: 10000
-    }
-  );
+// ---------------- COINGECKO BATCH PRICE (FIX 429) ----------------
+async function getMarketDataAll() {
+  try {
+    const ids = COINS.map(c => c.id).join(",");
 
-  return res.data.prices.map(p => p[1]).slice(-100);
+    const res = await axios.get(
+      `https://api.coingecko.com/api/v3/simple/price`,
+      {
+        params: {
+          ids,
+          vs_currencies: "php",
+          include_24hr_change: "true"
+        },
+        timeout: 10000
+      }
+    );
+
+    return res.data;
+  } catch (err) {
+    console.log("Market data error:", err.message);
+    return {};
+  }
+}
+
+// ---------------- PRICE HISTORY ----------------
+async function getPrices(coinId) {
+  try {
+    const res = await axios.get(
+      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart`,
+      {
+        params: {
+          vs_currency: "usd",
+          days: "5",
+          interval: "hourly"
+        },
+        timeout: 10000
+      }
+    );
+
+    return res.data.prices.map(p => p[1]).slice(-100);
+  } catch (err) {
+    console.log(`Price history error (${coinId}):`, err.message);
+    return [];
+  }
 }
 
 // ---------------- RSI ----------------
 function getRSI(prices) {
+  if (!prices.length) return null;
+
   const rsi = RSI.calculate({
     values: prices,
     period: 14
   });
 
-  return rsi[rsi.length - 1];
+  return rsi[rsi.length - 1] || null;
 }
 
-// ---------------- MARKET DATA (PHP) ----------------
-async function getMarketData(coinId) {
-  const res = await axios.get(
-    `https://api.coingecko.com/api/v3/simple/price`,
-    {
-      params: {
-        ids: coinId,
-        vs_currencies: "php",
-        include_24hr_change: "true"
-      },
-      timeout: 10000
-    }
-  );
-
-  return res.data[coinId];
-}
-
-// ---------------- SIGNAL ENGINE ----------------
+// ---------------- SIGNAL ENGINE (IMPROVED) ----------------
 function getSignal(rsi) {
+  if (!rsi) return "NO_TRADE";
+
   if (rsi <= 30) return "STRONG_BUY";
   if (rsi <= 40) return "BUY_ZONE";
   if (rsi >= 70) return "STRONG_SELL";
   if (rsi >= 60) return "SELL_ZONE";
+
   return "NO_TRADE";
 }
 
@@ -99,7 +117,7 @@ function formatMessage(signal, coin, rsi, pricePHP, change24h) {
 
   return (
     `${emoji} *${signal}*\n` +
-    `${coin.symbol}\n` +
+    `${coin.emoji} ${coin.symbol}\n` +
     `RSI: ${rsi.toFixed(2)}\n` +
     `Price: ₱${pricePHP.toLocaleString()}\n` +
     `24h Change: ${change24h.toFixed(2)}%\n` +
@@ -108,45 +126,54 @@ function formatMessage(signal, coin, rsi, pricePHP, change24h) {
   );
 }
 
-// ---------------- BOT LOGIC ----------------
-async function checkCoin(coin) {
+// ---------------- CORE LOGIC ----------------
+async function checkCoins() {
+  if (isRunning) return; // prevent overlap runs
+  isRunning = true;
+
   try {
-    const prices = await getPrices(coin.id);
-    const rsi = getRSI(prices);
+    const marketData = await getMarketDataAll();
 
-    const market = await getMarketData(coin.id);
+    for (const coin of COINS) {
+      const prices = await getPrices(coin.id);
+      const rsi = getRSI(prices);
 
-    const pricePHP = market.php;
-    const change24h = market.php_24h_change;
+      const signal = getSignal(rsi);
 
-    const signal = getSignal(rsi);
-    const key = coin.symbol;
+      if (signal === "NO_TRADE") continue;
 
-    console.log(`${coin.symbol} RSI:`, rsi, signal);
+      const key = coin.symbol;
 
-    if (signal === "NO_TRADE") return;
-    if (lastSignal[key] === signal) return;
+      if (lastSignal[key] === signal) continue;
 
-    lastSignal[key] = signal;
+      lastSignal[key] = signal;
 
-    await sendMessage(
-      formatMessage(signal, coin, rsi, pricePHP, change24h)
-    );
+      const data = marketData[coin.id];
+
+      if (!data) continue;
+
+      await sendMessage(
+        formatMessage(signal, coin, rsi, data.php, data.php_24h_change)
+      );
+
+      // 🔥 IMPORTANT: prevent CoinGecko rate limit
+      await new Promise(r => setTimeout(r, 1500));
+    }
 
   } catch (err) {
-    console.log(`Error (${coin.symbol}):`, err.message);
+    console.log("Bot error:", err.message);
+  } finally {
+    isRunning = false;
   }
 }
 
-// ---------------- LOOP ----------------
-async function runBot() {
-  for (const coin of COINS) {
-    await checkCoin(coin);
-  }
+// ---------------- START BOT ----------------
+async function start() {
+  console.log("Bot started...");
+
+  await checkCoins(); // initial run
+
+  setInterval(checkCoins, 60 * 60 * 1000);
 }
 
-// initial run
-runBot();
-
-// hourly loop
-setInterval(runBot, 60 * 60 * 1000);
+start();
