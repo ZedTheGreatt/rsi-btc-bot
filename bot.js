@@ -121,7 +121,7 @@ function formatMessage(signal, coin, rsi, pricePHP, change24h) {
     `RSI: ${rsi.toFixed(2)}\n` +
     `Price: ₱${pricePHP.toLocaleString()}\n` +
     `24h Change: ${change24h.toFixed(2)}%\n` +
-    `_PS: Data may be inaccurate._\n` +
+    `_PS: Data may be inaccurate._\n\n` +
     `© CoinGecko 2026`
   );
 }
