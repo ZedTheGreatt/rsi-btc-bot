@@ -1,0 +1,10 @@
+[
+  {
+    "signal": "STRONG_SELL",
+    "symbol": "BTC",
+    "rsi": "70.17",
+    "price": 4501333,
+    "change24h": 3.873989645716005,
+    "timestamp": "2026-04-14T16:22:45.204Z"
+  }
+]

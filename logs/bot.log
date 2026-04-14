@@ -1,0 +1,9 @@
+[2026-04-14T16:22:38.078Z] [INFO] Bot starting... | {"version":"2.0","coins":2}
+[2026-04-14T16:22:38.157Z] [INFO] Web service running on port 3000
+[2026-04-14T16:22:41.354Z] [INFO] Loaded 100 price points for bitcoin
+[2026-04-14T16:22:43.165Z] [INFO] Loaded 100 price points for ethereum
+[2026-04-14T16:22:44.670Z] [INFO] Initial history loaded
+[2026-04-14T16:22:45.200Z] [INFO] Signal generated: STRONG_SELL for BTC | {"rsi":"70.17","price":4501333}
+[2026-04-14T16:22:48.098Z] [INFO] Checks scheduled every 60 minutes
+[2026-04-14T16:22:48.100Z] [INFO] Telegram polling enabled
+[2026-04-14T16:22:48.101Z] [INFO] Bot fully started
