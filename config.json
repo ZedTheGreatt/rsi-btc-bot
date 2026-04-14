@@ -77,9 +77,16 @@
     "telegramOnly": true,
     "allowedCommands": [
       "status",
-      "history",
+      "health",
+      "stats",
       "coins",
+      "price",
+      "history",
+      "enable_coin",
+      "disable_coin",
+      "toggle_coin",
       "set_rsi",
+      "settings",
       "restart",
       "help"
     ]

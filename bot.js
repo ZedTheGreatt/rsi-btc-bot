@@ -111,27 +111,73 @@ async function sendMessage(text) {
   }
 }
 
+const COMMAND_ALIASES = {
+  set_thresholds: "set_rsi"
+};
+
+function normalizeCommand(command) {
+  return COMMAND_ALIASES[command] || command;
+}
+
+function isCommandAllowed(command) {
+  const allowed = config.admin?.allowedCommands || [];
+  return allowed.length === 0 || allowed.includes(command);
+}
+
+function findCoin(query) {
+  const normalized = String(query || "").trim().toLowerCase();
+  return config.coins.find(
+    coin =>
+      coin.id.toLowerCase() === normalized ||
+      coin.symbol.toLowerCase() === normalized
+  );
+}
+
+function saveConfig() {
+  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+}
+
 async function handleAdminCommand(message) {
-  const text = message.text.toLowerCase().trim();
-  const parts = text.split(" ");
-  const command = parts[0].replace("/", "");
+  const text = message.text.trim();
+  const parts = text.split(/\s+/);
+  const rawCommand = parts[0].replace(/^\//, "").toLowerCase();
+  const command = normalizeCommand(rawCommand);
+
+  if (!command) return;
+  if (!isCommandAllowed(command)) {
+    await sendMessage(`❌ Command \/${rawCommand} is not allowed.`);
+    return;
+  }
 
   try {
     switch (command) {
       case "status":
         return await sendStatus();
-      case "history":
-        return await sendHistory(parseInt(parts[1]) || 10);
+      case "health":
+        return await sendHealth();
+      case "stats":
+        return await sendStats();
       case "coins":
         return await sendCoinsList();
-      case "help":
-        return await sendHelp();
-      case "restart":
-        return await restartBot();
+      case "price":
+        return await sendPrice(parts[1]);
+      case "history":
+        return await sendHistory(parseInt(parts[1], 10) || 10);
+      case "enable_coin":
+        return await setCoinEnabled(parts[1], true);
+      case "disable_coin":
+        return await setCoinEnabled(parts[1], false);
+      case "toggle_coin":
+        return await toggleCoin(parts[1]);
       case "set_rsi":
         return await updateRSIThresholds(parts);
+      case "settings":
+        return await sendSettings();
+      case "restart":
+        return await restartBot();
+      case "help":
       default:
-        await sendMessage("❌ Unknown command. Type `/help` for available commands.");
+        return await sendHelp();
     }
   } catch (err) {
     logger.error("Admin command error", { command, error: err.message });
@@ -141,16 +187,163 @@ async function handleAdminCommand(message) {
 
 async function sendStatus() {
   const enabledCoins = config.coins.filter(c => c.enabled);
-  const status = `
-📊 *BOT STATUS*
-Status: ${isBotHealthy ? "🟢 Healthy" : "🔴 Unhealthy"}
-Total Checks: ${totalChecks}
-Total Alerts: ${totalAlerts}
-Uptime: ${Math.floor(process.uptime() / 60)}min
-Coins: ${enabledCoins.map(c => c.symbol).join(", ")}
-Last Check: ${lastCheckTime || "never"}
-  `.trim();
+  const status = [
+    "📊 *BOT STATUS*",
+    `Status: ${isBotHealthy ? "🟢 Healthy" : "🔴 Unhealthy"}`,
+    `Total Checks: ${totalChecks}`,
+    `Total Alerts: ${totalAlerts}`,
+    `Uptime: ${Math.floor(process.uptime() / 60)}min`,
+    `Monitored: ${enabledCoins.map(c => c.symbol).join(", ")}`,
+    `Last Check: ${lastCheckTime || "never"}`
+  ].join("\n");
+
   await sendMessage(status);
+}
+
+async function sendHealth() {
+  const health = [
+    "🩺 *BOT HEALTH*",
+    `Status: ${isBotHealthy ? "🟢 Healthy" : "🔴 Unhealthy"}`,
+    `Last Error: ${lastErrorTime || "none"}`,
+    `Last Check: ${lastCheckTime || "never"}`,
+    `Total Checks: ${totalChecks}`
+  ].join("\n");
+
+  await sendMessage(health);
+}
+
+async function sendStats() {
+  await sendMessage(
+    `📈 *STATS*\nTotal Checks: ${totalChecks}\nTotal Alerts: ${totalAlerts}\nCached Coins: ${Object.keys(priceCache).length}`
+  );
+}
+
+async function sendSettings() {
+  const thresholds = config.rsi;
+  const intervals = config.intervals;
+  const notifications = config.notifications.telegram;
+
+  const msg = [
+    "⚙️ *CURRENT SETTINGS*",
+    `RSI period: ${thresholds.period}`,
+    `Strong Buy: ${thresholds.strongBuy}`,
+    `Buy Zone: ${thresholds.buyZone}`,
+    `Sell Zone: ${thresholds.sellZone}`,
+    `Strong Sell: ${thresholds.strongSell}`,
+    "",
+    `Check Interval: ${intervals.checkInterval / 60000} min`,
+    `API Delay: ${intervals.apiDelay} ms`,
+    `History Load Delay: ${intervals.historyLoadDelay} ms`,
+    "",
+    `Telegram notifications: ${notifications.enabled ? "✅" : "❌"}`
+  ].join("\n");
+
+  await sendMessage(msg);
+}
+
+async function sendPrice(query) {
+  if (!query) {
+    await sendMessage("Usage: `/price bitcoin` or `/price BTC`");
+    return;
+  }
+
+  const coin = findCoin(query);
+  if (!coin) {
+    await sendMessage(`❌ Coin not found: ${query}`);
+    return;
+  }
+
+  try {
+    const res = await retryWithBackoff(async () => {
+      return await axios.get(`${config.api.coingecko.baseUrl}/simple/price`, {
+        params: {
+          ids: coin.id,
+          vs_currencies: "php,usd",
+          include_24hr_change: true
+        },
+        timeout: config.api.coingecko.timeout
+      });
+    }, config.api.coingecko.retries);
+
+    const data = res.data[coin.id];
+    if (!data) {
+      await sendMessage(`⚠️ Price data unavailable for ${coin.symbol}`);
+      return;
+    }
+
+    await sendMessage([
+      `💱 *${coin.symbol} PRICE*`,
+      `${coin.emoji} ${coin.symbol}`,
+      `USD: $${data.usd.toLocaleString()}`,
+      `PHP: ₱${data.php.toLocaleString()}`,
+      `24h Change: ${data.php_24h_change?.toFixed(2) || 0}%`
+    ].join("\n"));
+  } catch (err) {
+    logger.error("Price query failed", { coin: coin.id, error: err.message });
+    await sendMessage(`❌ Failed to fetch price for ${coin.symbol}`);
+  }
+}
+
+async function setCoinEnabled(identifier, enabled) {
+  if (!identifier) {
+    await sendMessage(`Usage: /${enabled ? "enable_coin" : "disable_coin"} <coin>`);
+    return;
+  }
+
+  const coin = findCoin(identifier);
+  if (!coin) {
+    await sendMessage(`❌ Coin not found: ${identifier}`);
+    return;
+  }
+
+  coin.enabled = enabled;
+  saveConfig();
+  await sendMessage(`✅ ${coin.symbol} is now ${enabled ? "enabled" : "disabled"}.`);
+}
+
+async function toggleCoin(identifier) {
+  if (!identifier) {
+    await sendMessage("Usage: /toggle_coin <coin>");
+    return;
+  }
+
+  const coin = findCoin(identifier);
+  if (!coin) {
+    await sendMessage(`❌ Coin not found: ${identifier}`);
+    return;
+  }
+
+  coin.enabled = !coin.enabled;
+  saveConfig();
+  await sendMessage(`✅ ${coin.symbol} has been ${coin.enabled ? "enabled" : "disabled"}.`);
+}
+
+async function restartBot() {
+  await sendMessage("🔄 Restarting bot...");
+  logger.info("Bot restart requested via Telegram");
+  process.exit(0);
+}
+
+async function updateRSIThresholds(parts) {
+  if (parts.length < 3) {
+    await sendMessage("Usage: `/set_rsi 40 60` (buyZone sellZone)");
+    return;
+  }
+
+  const buyZone = parseFloat(parts[1]);
+  const sellZone = parseFloat(parts[2]);
+
+  if (isNaN(buyZone) || isNaN(sellZone) || buyZone >= sellZone) {
+    await sendMessage("❌ Invalid values. Buy zone must be less than sell zone.");
+    return;
+  }
+
+  config.rsi.buyZone = buyZone;
+  config.rsi.sellZone = sellZone;
+  saveConfig();
+  logger.info("RSI thresholds updated", { buyZone, sellZone });
+
+  await sendMessage(`✅ RSI thresholds updated\nBuy Zone: ${buyZone}\nSell Zone: ${sellZone}`);
 }
 
 async function sendHistory(limit = 10) {
@@ -160,10 +353,10 @@ async function sendHistory(limit = 10) {
     return;
   }
 
-  let msg = "📜 *RECENT TRADES* (last " + limit + ")\n\n";
-  trades.slice(0, limit).forEach((trade, idx) => {
+  let msg = `📜 *RECENT TRADES* (last ${limit})\n\n`;
+  trades.forEach((trade, idx) => {
     const icon = trade.signal.includes("BUY") ? "🟢" : "🔴";
-    msg += `${idx + 1}. ${icon} ${trade.signal} - ${trade.symbol} @ ${trade.rsi.toFixed(2)} RSI\n`;
+    msg += `${idx + 1}. ${icon} ${trade.signal} - ${trade.symbol} @ ${trade.rsi} RSI\n`;
   });
 
   await sendMessage(msg);
@@ -175,53 +368,29 @@ async function sendCoinsList() {
     const status = coin.enabled ? "✅" : "❌";
     msg += `${status} ${coin.emoji} ${coin.symbol} (${coin.id})\n`;
   });
-  msg += "\n_To enable/disable coins, edit config.json_";
+  msg += "\nUse /enable_coin, /disable_coin or /toggle_coin to update coins.";
   await sendMessage(msg);
 }
 
 async function sendHelp() {
-  const help = `
-🤖 *AVAILABLE COMMANDS*
+  const help = [
+    "🤖 *AVAILABLE COMMANDS*",
+    "/status - Show bot status",
+    "/health - Show health details",
+    "/stats - Show numeric bot stats",
+    "/coins - List monitored coins",
+    "/price <coin> - Show current price for a coin",
+    "/history [limit] - Show recent trades",
+    "/set_rsi <buy_zone> <sell_zone> - Update RSI thresholds",
+    "/enable_coin <coin> - Enable monitoring for a coin",
+    "/disable_coin <coin> - Disable monitoring for a coin",
+    "/toggle_coin <coin> - Toggle coin monitoring",
+    "/settings - Show current bot settings",
+    "/restart - Restart the bot",
+    "/help - Show this message"
+  ].join("\n");
 
-/status - Show bot status
-/coins - List monitored coins
-/history [limit] - Show recent trades
-/set_rsi buy_zone sell_zone - Update thresholds
-/restart - Restart bot
-/help - Show this message
-  `.trim();
   await sendMessage(help);
-}
-
-async function restartBot() {
-  await sendMessage("🔄 Restarting bot...");
-  logger.info("Bot restart requested via Telegram");
-  process.exit(0);
-}
-
-async function updateRSIThresholds(parts) {
-  if (parts.length < 3) {
-    await sendMessage("Usage: `/set_rsi 40 60`");
-    return;
-  }
-
-  const buyZone = parseFloat(parts[1]);
-  const sellZone = parseFloat(parts[2]);
-
-  if (isNaN(buyZone) || isNaN(sellZone) || buyZone >= sellZone) {
-    await sendMessage("❌ Invalid values. Buy zone must be < sell zone");
-    return;
-  }
-
-  config.rsi.buyZone = buyZone;
-  config.rsi.sellZone = sellZone;
-
-  fs.writeFileSync("./config.json", JSON.stringify(config, null, 2));
-  logger.info("RSI thresholds updated", { buyZone, sellZone });
-
-  await sendMessage(
-    `✅ RSI thresholds updated\nBuy Zone: ${buyZone}\nSell Zone: ${sellZone}`
-  );
 }
 
 // ========== TELEGRAM BOT POLLING ==========
