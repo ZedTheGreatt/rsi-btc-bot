@@ -1,0 +1,19 @@
+# Security: Do NOT upload your environment variables/secrets
+.env
+
+# Dependencies: These are installed via 'npm install' on Render
+node_modules/
+
+# Logs: Standard Node.js logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Optional: If you use VS Code
+.vscode/
