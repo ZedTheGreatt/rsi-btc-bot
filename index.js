@@ -21,9 +21,10 @@ let isBotActive = true;
 
 // Render.com compatibility: Express server
 const app = express();
-app.get('/', (req, res) => res.send('RSI Bot Alive'));
-app.listen(process.env.PORT || 3000);
-
+app.get('/', (req, res) => res.send('RSI Bot is Awake!'));
+app.listen(process.env.PORT || 3000, () => {
+    console.log('Web server is running');
+});
 /**
  * Core Message Generator
  */
