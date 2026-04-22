@@ -41,9 +41,9 @@ async function processUpdates(forceNotify = false) {
 ${data.sign}
 *${data.symbol}/PHP*
 RSI: ${data.rsi} (${data.trend})
-Price: USD ${data.priceUSD}
-Price: PHP ${data.pricePHP}
-24h Change: ${data.change}%
+Price: $${data.priceUSD}
+Price: ₱${data.pricePHP}
+24h Change: ${data.change * 100}%
             `;
             bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         }
