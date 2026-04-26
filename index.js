@@ -23,6 +23,14 @@ const coinLogo = {
     XRP: "✕ XRP"
 };
 
+function normalizeInputSymbol(rawSymbol) {
+    const symbol = String(rawSymbol || '').toUpperCase().trim();
+    if (symbol.endsWith('USDT')) return symbol;
+    if (symbol.endsWith('USD')) return `${symbol}T`;
+    if (symbol.endsWith('PHP')) return symbol;
+    return `${symbol}PHP`;
+}
+
 // State
 let isBotActive = true;
 
@@ -52,9 +60,9 @@ async function processUpdates(forceNotify = false) {
         if (data.alert || forceNotify) {
             const message = `
 ${data.sign}
-💰*${data.symbol}/PHP*
+💰*${data.pair}*
 RSI: ${data.rsi} (${data.trend})
-Price: $${data.priceUSD}
+Price: ${data.priceUSDT} USDT
 Price: ₱${data.pricePHP}
 24h Change: ${(data.change * 100).toFixed(2)}%
             `;
@@ -89,7 +97,7 @@ bot.onText(/\/coins/, (msg) => {
 
     const formatted = coins
         .map(c => {
-            const clean = c.replace("PHP", "").trim(); // BTCPHP → BTC
+            const clean = c.replace(/(USDT|USD|PHP)$/, "").trim();
             return coinLogo[clean] || `⚪ ${clean}`;
         })
         .join("\n");
@@ -100,10 +108,10 @@ bot.onText(/\/coins/, (msg) => {
 });
 
 bot.onText(/\/price (.+)/, async (msg, match) => {
-    const symbol = match[1].toUpperCase().endsWith('PHP') ? match[1].toUpperCase() : `${match[1].toUpperCase()}PHP`;
+    const symbol = normalizeInputSymbol(match[1]);
     const data = await getMarketAnalysis(symbol);
     if (data) {
-        bot.sendMessage(msg.chat.id, `💰 *${data.symbol}*\nPrice: PHP ${data.pricePHP}\nRSI: ${data.rsi}`, { parse_mode: 'Markdown' });
+        bot.sendMessage(msg.chat.id, `💰 *${data.pair}*\nPrice: ${data.priceUSDT} USDT\nPrice: PHP ${data.pricePHP}\nRSI: ${data.rsi}`, { parse_mode: 'Markdown' });
     } else {
         bot.sendMessage(msg.chat.id, "❌ Coin not found.");
     }
