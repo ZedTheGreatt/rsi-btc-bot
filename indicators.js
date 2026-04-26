@@ -27,14 +27,14 @@ async function getMarketAnalysis(symbol) {
         const currentPriceUSD = (currentPricePHP * phpToUsdRate).toFixed(2);
 
         // Determine Sign
-        let sign = "⚪ [NEUTRAL]";
+        let sign = "🟡[NEUTRAL]🟡";
         let alert = false;
         if (currentRSI <= 30) { 
-            sign = "🟢 [BUY ZONE]"; 
+            sign = "🟢[BUY ZONE]🟢"; 
             alert = true;
         }
         else if (currentRSI >= 70) { 
-            sign = "🔴 [SELL ZONE]"; 
+            sign = "🔴[SELL ZONE]🔴"; 
             alert = true;
         }
 
@@ -47,7 +47,7 @@ async function getMarketAnalysis(symbol) {
             priceUSD: currentPriceUSD,
             change: change24h,
             alert,
-            trend: currentPricePHP > currentEMA ? "Bullish" : "Bearish"
+            trend: currentPricePHP > currentEMA ? "📈Bullish" : "📉Bearish"
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);

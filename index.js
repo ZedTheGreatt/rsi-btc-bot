@@ -2,6 +2,7 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const express = require('express');
+const app = express();
 const { getMarketAnalysis } = require('./indicators');
 
 // Config
@@ -15,16 +16,28 @@ const bot = new TelegramBot(token, {
         }
     } 
 });
+const coinLogo = {
+    BTC: "₿ BTC",
+    ETH: "⟠ ETH",
+    SOL: "◎ SOL",
+    XRP: "✕ XRP"
+};
 
 // State
 let isBotActive = true;
 
 // Render.com compatibility: Express server
-const app = express();
-app.get('/', (req, res) => res.send('RSI Bot is Awake!'));
-app.listen(process.env.PORT || 3000, () => {
-    console.log('Web server is running');
-});
+const PORT = process.env.PORT;
+
+if (PORT) {
+    app.listen(PORT, () => {
+        console.log("CoinsBot running on Render");
+    });
+} else {
+    app.listen(3000, () => {
+        console.log("CoinsBot running locally on 3000");
+    });
+}
 /**
  * Core Message Generator
  */
@@ -39,11 +52,11 @@ async function processUpdates(forceNotify = false) {
         if (data.alert || forceNotify) {
             const message = `
 ${data.sign}
-*${data.symbol}/PHP*
+💰*${data.symbol}/PHP*
 RSI: ${data.rsi} (${data.trend})
 Price: $${data.priceUSD}
 Price: ₱${data.pricePHP}
-24h Change: ${data.change * 100}%
+24h Change: ${(data.change * 100).toFixed(2)}%
             `;
             bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         }
@@ -54,16 +67,16 @@ Price: ₱${data.pricePHP}
 
 bot.onText(/\/start/, (msg) => {
     isBotActive = true;
-    bot.sendMessage(msg.chat.id, "🚀 *RSI Bot Activated*\nMonitoring every hour for Buy/Sell zones.", { parse_mode: 'Markdown' });
+    bot.sendMessage(msg.chat.id, "🤖*RSI Bot Activated*\nMonitoring every hour for Buy/Sell zones.", { parse_mode: 'Markdown' });
 });
 
 bot.onText(/\/end/, (msg) => {
     isBotActive = false;
-    bot.sendMessage(msg.chat.id, "🛑 *Bot Paused*");
+    bot.sendMessage(msg.chat.id, "🛑*Bot Paused*");
 });
 
 bot.onText(/\/restart/, (msg) => {
-    bot.sendMessage(msg.chat.id, "🔄 *Restarting monitor...*");
+    bot.sendMessage(msg.chat.id, "🔄*Restarting monitor...*");
     processUpdates(true);
 });
 
@@ -72,7 +85,18 @@ bot.onText(/\/now/, (msg) => {
 });
 
 bot.onText(/\/coins/, (msg) => {
-    bot.sendMessage(msg.chat.id, `📍 *Monitoring:* ${process.env.COINS}`);
+    const coins = process.env.COINS.split(",");
+
+    const formatted = coins
+        .map(c => {
+            const clean = c.replace("PHP", "").trim(); // BTCPHP → BTC
+            return coinLogo[clean] || `⚪ ${clean}`;
+        })
+        .join("\n");
+
+    bot.sendMessage(msg.chat.id, `📍 *Monitoring:*\n${formatted}`, {
+        parse_mode: "Markdown"
+    });
 });
 
 bot.onText(/\/price (.+)/, async (msg, match) => {
