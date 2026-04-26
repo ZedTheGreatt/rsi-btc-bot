@@ -62,7 +62,7 @@ async function processUpdates(forceNotify = false) {
 ${data.sign}
 💰*${data.pair}*
 RSI: ${data.rsi} (${data.trend})
-Price: ${data.priceUSDT} USDT
+Price: ₮${data.priceUSDT}
 Price: ₱${data.pricePHP}
 24h Change: ${(data.change * 100).toFixed(2)}%
             `;
@@ -111,7 +111,7 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     const symbol = normalizeInputSymbol(match[1]);
     const data = await getMarketAnalysis(symbol);
     if (data) {
-        bot.sendMessage(msg.chat.id, `💰 *${data.pair}*\nPrice: ${data.priceUSDT} USDT\nPrice: PHP ${data.pricePHP}\nRSI: ${data.rsi}`, { parse_mode: 'Markdown' });
+        bot.sendMessage(msg.chat.id, `💰 *${data.pair}*\nPrice: ₮${data.priceUSDT} \nPrice: ₱${data.pricePHP}\nRSI: ${data.rsi}`, { parse_mode: 'Markdown' });
     } else {
         bot.sendMessage(msg.chat.id, "❌ Coin not found.");
     }
