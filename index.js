@@ -175,7 +175,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
       if (data.alert || forceNotify) {
         const message = [
           `${data.sign || '📊'}`,
-          `*~~ ${coinLogo[data.symbol] || data.symbol} ~~*`,
+          `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
           `📊 INDICATORS`,
           `- RSI (14): ${data.rsi} ${data.trend}`,
           `- EMA (50): ₱${data.ema}`,
