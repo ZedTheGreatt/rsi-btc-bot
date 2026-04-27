@@ -39,14 +39,14 @@ async function getMarketAnalysis(symbol) {
         const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice).toFixed(2);
 
         // Determine Sign
-        let sign = "🟡[NEUTRAL]🟡";
+        let sign = "⚪ [NEUTRAL] ⚪";
         let alert = false;
         if (currentRSI <= 30) { 
-            sign = "🟢[BUY ZONE]🟢"; 
+            sign = "🟢 [BUY ZONE] 🟢"; 
             alert = true;
         }
         else if (currentRSI >= 70) { 
-            sign = "🔴[SELL ZONE]🔴"; 
+            sign = "🔴 [SELL ZONE] 🔴"; 
             alert = true;
         }
 
@@ -55,12 +55,21 @@ async function getMarketAnalysis(symbol) {
             pair: normalizedSymbol,
             sign,
             rsi: currentRSI.toFixed(2),
-            ema: currentEMA.toFixed(2),
-            pricePHP: currentPricePHP.toLocaleString(),
-            priceUSDT: currentPriceUSDT,
+            ema: Number(currentEMA).toLocaleString('en-US', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            }),
+            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            }),
+            priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            }),
             change: change24h,
             alert,
-            trend: currentPricePHP > currentEMA ? "📈Bullish" : "📉Bearish"
+            trend: currentPricePHP > currentEMA ? "📈" : "📉"
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);

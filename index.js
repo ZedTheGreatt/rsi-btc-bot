@@ -1,149 +1,366 @@
 require('dotenv').config();
+
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const express = require('express');
-const app = express();
 const { getMarketAnalysis } = require('./indicators');
 
-// Config
+const app = express();
+
+// =========================
+// CONFIG
+// =========================
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID;
-const coinList = process.env.COINS.split(',');
-const bot = new TelegramBot(token, { 
-    polling: {
-        params: {
-            timeout: 10
-        }
-    } 
-});
+const coinList = (process.env.COINS || '')
+  .split(',')
+  .map(c => c.trim())
+  .filter(Boolean);
+
+if (!token) throw new Error('Missing TELEGRAM_BOT_TOKEN');
+if (!chatId) throw new Error('Missing TELEGRAM_CHAT_ID');
+if (!coinList.length) throw new Error('Missing COINS');
+
+// IMPORTANT: polling false first
+const bot = new TelegramBot(token, { polling: false });
+
 const coinLogo = {
-    BTC: "₿ BTC",
-    ETH: "⟠ ETH",
-    SOL: "◎ SOL",
-    XRP: "✕ XRP"
+  BTC: '₿ BTC ₿',
+  ETH: '⟠ ETH ⟠',
+  SOL: '◎ SOL ◎',
+  XRP: '✕ XRP ✕'
 };
 
-function normalizeInputSymbol(rawSymbol) {
-    const symbol = String(rawSymbol || '').toUpperCase().trim();
-    if (symbol.endsWith('USDT')) return symbol;
-    if (symbol.endsWith('USD')) return `${symbol}T`;
-    if (symbol.endsWith('PHP')) return symbol;
-    return `${symbol}PHP`;
-}
-
-// State
+// =========================
+// STATE
+// =========================
 let isBotActive = true;
+let pollingStarted = false;
+let restarting = false;
 
-// Render.com compatibility: Express server
-const PORT = process.env.PORT;
+// =========================
+// EXPRESS SERVER
+// =========================
+app.get('/', (req, res) => {
+  res.status(200).send('CoinsBot is running.');
+});
 
-if (PORT) {
-    app.listen(PORT, () => {
-        console.log("CoinsBot running on Render");
-    });
-} else {
-    app.listen(3000, () => {
-        console.log("CoinsBot running locally on 3000");
-    });
+const PORT = process.env.PORT || 3000;
+
+const server = app.listen(PORT, () => {
+  console.log(`CoinsBot running on port ${PORT}`);
+});
+
+// =========================
+// HELPERS
+// =========================
+function normalizeInputSymbol(rawSymbol) {
+  const symbol = String(rawSymbol || '').toUpperCase().trim();
+
+  if (!symbol) return null;
+  if (symbol.endsWith('USDT')) return symbol;
+  if (symbol.endsWith('USD')) return `${symbol}T`;
+  if (symbol.endsWith('PHP')) return symbol;
+
+  return `${symbol}PHP`;
 }
-/**
- * Core Message Generator
- */
-async function processUpdates(forceNotify = false) {
-    if (!isBotActive && !forceNotify) return;
 
-    for (const symbol of coinList) {
-        const data = await getMarketAnalysis(symbol);
-        if (!data) continue;
+function formatCoinsList(coins) {
+  return coins
+    .map(c => {
+      const clean = c.replace(/(USDT|USD|PHP)$/i, '').trim().toUpperCase();
+      return coinLogo[clean] || `⚪ ${clean}`;
+    })
+    .join('\n');
+}
 
-        // Notify if it's a Buy/Sell signal OR if user requested /now
-        if (data.alert || forceNotify) {
-            const message = `
-${data.sign}
-💰*${data.pair}*
-RSI: ${data.rsi} (${data.trend})
-Price: ₮${data.priceUSDT}
-Price: ₱${data.pricePHP}
-24h Change: ${(data.change * 100).toFixed(2)}%
-            `;
-            bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-        }
+async function safeSend(chatId, text, options = {}) {
+  try {
+    await bot.sendMessage(chatId, text, options);
+  } catch (err) {
+    console.error('Send message failed:', err.message);
+  }
+}
+
+// =========================
+// POLLING CONTROL
+// =========================
+let reconnectDelay = 5000;
+const MAX_DELAY = 60000;
+
+async function startPolling() {
+  if (pollingStarted || restarting) {
+    console.log('Polling already active / restarting');
+    return;
+  }
+
+  try {
+    restarting = true;
+
+    // remove webhook
+    await bot.deleteWebHook({
+      drop_pending_updates: true
+    }).catch(() => {});
+
+    // stop stale polling
+    await bot.stopPolling().catch(() => {});
+
+    await bot.startPolling({
+      restart: true,
+      interval: 2000,
+      autoStart: false,
+      params: {
+        timeout: 30
+      }
+    });
+
+    pollingStarted = true;
+    reconnectDelay = 5000;
+
+    console.log('Telegram polling started');
+  } catch (err) {
+    console.error('Start polling failed:', err.message);
+    await restartPolling(reconnectDelay);
+  } finally {
+    restarting = false;
+  }
+}
+
+async function stopPolling() {
+  try {
+    pollingStarted = false;
+    await bot.stopPolling().catch(() => {});
+    console.log('Telegram polling stopped');
+  } catch (err) {
+    console.error('Stop polling failed:', err.message);
+  }
+}
+
+async function restartPolling(delay = reconnectDelay) {
+  if (restarting) {
+    console.log('Restart already in progress');
+    return;
+  }
+
+  restarting = true;
+  pollingStarted = false;
+
+  await bot.stopPolling().catch(() => {});
+
+  console.log(`Restarting polling in ${delay / 1000}s...`);
+
+  setTimeout(async () => {
+    try {
+      reconnectDelay = Math.min(delay * 2, MAX_DELAY);
+      await startPolling();
+    } catch (err) {
+      console.error('Restart failed:', err.message);
+    } finally {
+      restarting = false;
     }
+  }, delay);
 }
 
-// --- TELEGRAM COMMANDS ---
+// =========================
+// CORE UPDATE LOGIC
+// =========================
+async function processUpdates(forceNotify = false, targetChatId = chatId) {
+  if (!isBotActive && !forceNotify) return;
 
-bot.onText(/\/start/, (msg) => {
-    isBotActive = true;
-    bot.sendMessage(msg.chat.id, "🤖*RSI Bot Activated*\nMonitoring every hour for Buy/Sell zones.", { parse_mode: 'Markdown' });
+  for (const symbol of coinList) {
+    try {
+      const data = await getMarketAnalysis(symbol);
+      if (!data) continue;
+
+      if (data.alert || forceNotify) {
+        const message = [
+          `${data.sign || '📊'}`,
+          `*~~ ${coinLogo[data.symbol] || data.symbol} ~~*`,
+          `📊 INDICATORS`,
+          `- RSI (14): ${data.rsi} ${data.trend}`,
+          `- EMA (50): ₱${data.ema}`,
+          `💵 PRICE`,
+          `- ${data.symbol}/PHP: ₱${data.pricePHP}`,
+          `- ${data.symbol}/USDT: $${data.priceUSDT}`,
+          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
+        ].join('\n');
+
+        await safeSend(targetChatId, message, {
+          parse_mode: 'Markdown'
+        });
+      }
+    } catch (err) {
+      console.error(`Error processing ${symbol}:`, err.message);
+    }
+  }
+}
+
+// =========================
+// TELEGRAM COMMANDS
+// =========================
+bot.onText(/\/start$/, async msg => {
+  isBotActive = true;
+
+  await safeSend(
+    msg.chat.id,
+    '🤖 *RSI Bot Activated*\nMonitoring every hour for Buy/Sell zones.',
+    { parse_mode: 'Markdown' }
+  );
 });
 
-bot.onText(/\/end/, (msg) => {
-    isBotActive = false;
-    bot.sendMessage(msg.chat.id, "🛑*Bot Paused*");
+bot.onText(/\/end$/, async msg => {
+  isBotActive = false;
+
+  await safeSend(
+    msg.chat.id,
+    '🛑 *Bot Paused*',
+    { parse_mode: 'Markdown' }
+  );
 });
 
-bot.onText(/\/restart/, (msg) => {
-    bot.sendMessage(msg.chat.id, "🔄*Restarting monitor...*");
-    processUpdates(true);
+bot.onText(/\/restart$/, async msg => {
+  await safeSend(
+    msg.chat.id,
+    '🔄 *Restarting bot...*',
+    { parse_mode: 'Markdown' }
+  );
+
+  await restartPolling(2000);
 });
 
-bot.onText(/\/now/, (msg) => {
-    processUpdates(true);
+bot.onText(/\/now$/, async msg => {
+  await safeSend(
+    msg.chat.id,
+    '📡 *Checking latest market data...*',
+    { parse_mode: 'Markdown' }
+  );
+
+  await processUpdates(true, msg.chat.id);
 });
 
-bot.onText(/\/coins/, (msg) => {
-    const coins = process.env.COINS.split(",");
+bot.onText(/\/coins$/, async msg => {
+  const formatted = formatCoinsList(coinList);
 
-    const formatted = coins
-        .map(c => {
-            const clean = c.replace(/(USDT|USD|PHP)$/, "").trim();
-            return coinLogo[clean] || `⚪ ${clean}`;
-        })
-        .join("\n");
-
-    bot.sendMessage(msg.chat.id, `📍 *Monitoring:*\n${formatted}`, {
-        parse_mode: "Markdown"
-    });
+  await safeSend(
+    msg.chat.id,
+    `📍 *Monitoring:*\n${formatted}`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 bot.onText(/\/price (.+)/, async (msg, match) => {
+  try {
     const symbol = normalizeInputSymbol(match[1]);
+
+    if (!symbol) {
+      await safeSend(msg.chat.id, '❌ Invalid coin.');
+      return;
+    }
+
     const data = await getMarketAnalysis(symbol);
-    if (data) {
-        bot.sendMessage(msg.chat.id, `💰 *${data.pair}*\nPrice: ₮${data.priceUSDT} \nPrice: ₱${data.pricePHP}\nRSI: ${data.rsi}`, { parse_mode: 'Markdown' });
-    } else {
-        bot.sendMessage(msg.chat.id, "❌ Coin not found.");
+
+    if (!data) {
+      await safeSend(msg.chat.id, '❌ Coin not found.');
+      return;
     }
+
+    await safeSend(
+      msg.chat.id,
+      [
+        `💰 *${data.pair}*`,
+        `USDT ${data.priceUSDT}`,
+        `PHP ${data.pricePHP}`,
+        `RSI: ${data.rsi} (${data.trend})`
+      ].join('\n'),
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error(err.message);
+    await safeSend(msg.chat.id, '⚠️ Failed to fetch price.');
+  }
 });
 
-bot.onText(/\/help|\/commands/, (msg) => {
-    bot.sendMessage(msg.chat.id, `
-*Commands List:*
-/start - Start hourly alerts
-/end - Stop alerts
-/restart - Clear state and check now
-/now - Show market data for all coins
-/coins - List tracked coins
-/price [coin] - Quick price check (e.g. /price BTC)
-    `, { parse_mode: 'Markdown' });
+bot.onText(/\/help|\/commands/, async msg => {
+  await safeSend(
+    msg.chat.id,
+    [
+      '*Commands List:*',
+      '/help or /commands - Show commands list',
+      '/start - Start hourly alerts',
+      '/end - Stop alerts',
+      '/restart - Restart bot polling',
+      '/now - Show market data now',
+      '/coins - List tracked coins',
+      '/price [coin] - Quick price check'
+    ].join('\n'),
+    { parse_mode: 'Markdown' }
+  );
 });
 
-// --- SCHEDULER ---
-
-// Runs every hour (at minute 0)
-cron.schedule('0 * * * *', () => {
-    console.log('Running Hourly Check...');
-    processUpdates(false);
+// =========================
+// SCHEDULER
+// =========================
+cron.schedule('0 * * * *', async () => {
+  console.log('Running hourly check...');
+  await processUpdates(false);
 });
 
-console.log('Telegram Bot is running...');
+// =========================
+// ERROR HANDLING
+// =========================
+bot.on('polling_error', async (error) => {
+  const msg = String(error.message || '');
 
-// Add this to index.js
-bot.on('polling_error', (error) => {
-    if (error.code === 'ECONNRESET') {
-        console.log('Network connection reset. Retrying...');
-    } else {
-        console.error('Polling error:', error.code, error.message);
-    }
+  console.error('Polling error:', error.code, msg);
+
+  const recoverable =
+    msg.includes('409 Conflict') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('EFATAL');
+
+  if (recoverable) {
+    console.log(`Recoverable error detected. Reconnecting in ${reconnectDelay / 1000}s...`);
+    await restartPolling();
+    return;
+  }
+
+  console.log('Non-recoverable polling error.');
 });
+
+// Reset reconnect delay when bot is healthy again
+bot.on('message', () => {
+  reconnectDelay = 5000;
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+
+// =========================
+// SHUTDOWN
+// =========================
+async function shutdown(signal) {
+  console.log(`${signal} received`);
+
+  await stopPolling().catch(() => {});
+
+  server.close(() => {
+    process.exit(0);
+  });
+
+  setTimeout(() => process.exit(1), 10000);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+// =========================
+// START
+// =========================
+console.log('Telegram Bot starting...');
+startPolling();
