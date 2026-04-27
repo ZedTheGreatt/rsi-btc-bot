@@ -1,9 +1,3 @@
-This is a renewed and modernized `README.md` for **CoinsBot**, reflecting the new branding, updated setup instructions, and deployment tips.
-
----
-
-# START OF FILE README.md
-
 # 🤖 CoinsBot (Coins.ph Edition)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org/)
 [![API](https://img.shields.io/badge/API-Coins.ph%20Pro-blue)](https://pro.coins.ph/)
