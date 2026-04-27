@@ -117,7 +117,7 @@ async function startPolling() {
     pollingStarted = true;
     reconnectDelay = 5000;
 
-    console.log('Telegram polling started');
+    console.log('CoinsBot polling started');
   } catch (err) {
     console.error('Start polling failed:', err.message);
     await restartPolling(reconnectDelay);
@@ -130,7 +130,7 @@ async function stopPolling() {
   try {
     pollingStarted = false;
     await bot.stopPolling().catch(() => {});
-    console.log('Telegram polling stopped');
+    console.log('CoinsBot polling stopped');
   } catch (err) {
     console.error('Stop polling failed:', err.message);
   }
@@ -147,7 +147,7 @@ async function restartPolling(delay = reconnectDelay) {
 
   await bot.stopPolling().catch(() => {});
 
-  console.log(`Restarting polling in ${delay / 1000}s...`);
+  console.log(`Restarting CoinsBot in ${delay / 1000}s...`);
 
   setTimeout(async () => {
     try {
@@ -174,14 +174,18 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
 
       if (data.alert || forceNotify) {
         const message = [
-          `${data.sign || '📊'}`,
+          `${data.sign}`,
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📊 INDICATORS`,
-          `- RSI (14): ${data.rsi} ${data.trend}`,
+          `📝 *REC:* ${data.recommendation}`,
+          ``,
+          `📊 *INDICATORS*`,
+          `- Trend: ${data.trend}`,
+          `- RSI (14): ${data.rsi}`,
           `- EMA (50): ₱${data.ema}`,
-          `💵 PRICE`,
-          `- ${data.symbol}/PHP: ₱${data.pricePHP}`,
-          `- ${data.symbol}/USDT: $${data.priceUSDT}`,
+          ``,
+          `💵 *PRICE*`,
+          `- PHP: ₱${data.pricePHP}`,
+          `- USDT: $${data.priceUSDT}`,
           `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
         ].join('\n');
 
@@ -203,7 +207,7 @@ bot.onText(/\/start$/, async msg => {
 
   await safeSend(
     msg.chat.id,
-    '🤖 *RSI Bot Activated*\nMonitoring every hour for Buy/Sell zones.',
+    '🤖 *CoinsBot Activated*\nMonitoring every hour for Buy dips / Sell bounces.',
     { parse_mode: 'Markdown' }
   );
 });
@@ -213,7 +217,7 @@ bot.onText(/\/end$/, async msg => {
 
   await safeSend(
     msg.chat.id,
-    '🛑 *Bot Paused*',
+    '🛑 *CoinsBot Paused*',
     { parse_mode: 'Markdown' }
   );
 });
@@ -221,7 +225,7 @@ bot.onText(/\/end$/, async msg => {
 bot.onText(/\/restart$/, async msg => {
   await safeSend(
     msg.chat.id,
-    '🔄 *Restarting bot...*',
+    '🔄 *Restarting CoinsBot...*',
     { parse_mode: 'Markdown' }
   );
 
@@ -268,9 +272,12 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
       msg.chat.id,
       [
         `💰 *${data.pair}*`,
-        `USDT ${data.priceUSDT}`,
-        `PHP ${data.pricePHP}`,
-        `RSI: ${data.rsi} (${data.trend})`
+        `${data.sign}`,
+        `👉 ${data.recommendation}`,
+        `USDT: $${data.priceUSDT}`,
+        `PHP: ₱${data.pricePHP}`,
+        `Trend: ${data.trend}`,
+        `RSI: ${data.rsi}`
       ].join('\n'),
       { parse_mode: 'Markdown' }
     );
@@ -284,7 +291,7 @@ bot.onText(/\/help|\/commands/, async msg => {
   await safeSend(
     msg.chat.id,
     [
-      '*Commands List:*',
+      '🤖 *CoinsBot Commands List:*',
       '/help or /commands - Show commands list',
       '/start - Start hourly alerts',
       '/end - Stop alerts',
@@ -362,5 +369,5 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 // =========================
 // START
 // =========================
-console.log('Telegram Bot starting...');
+console.log('CoinsBot starting...');
 startPolling();
