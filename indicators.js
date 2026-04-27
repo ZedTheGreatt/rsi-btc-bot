@@ -8,6 +8,98 @@ function normalizeSymbol(rawSymbol) {
     return symbol;
 }
 
+// Generates an Image Chart from QuickChart.io using our market arrays
+async function getChartBuffer(closes, emaValues, symbol) {
+    try {
+        // Ensure the EMA array maps to the exact same points in the Closes timeline
+        const paddingCount = closes.length - emaValues.length;
+        const alignedEma = [...(new Array(Math.max(0, paddingCount)).fill(null)), ...emaValues];
+
+        // Changed from 60 to 24 for the Last 24hrs View
+        const visiblePoints = 72;
+        const chartCloses = closes.slice(-visiblePoints);
+        const chartEma = alignedEma.slice(-visiblePoints);
+        
+        // Form generic bottom labels (-24h, -23h... -1h, NOW)
+        const labels = Array.from({ length: chartCloses.length }, (_, i) => 
+            i === chartCloses.length - 1 ? 'NOW' : `-${chartCloses.length - 1 - i}h`
+        );
+
+        // ============================================
+        // AESTHETICS: Dark Mode / TradingView Style
+        // ============================================
+        const chartConfig = {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: `${symbol} Price`,
+                        data: chartCloses,
+                        borderColor: '#00D8FF', // Neon Cyan
+                        backgroundColor: 'rgba(0, 216, 255, 0.15)', // Light Cyan Tint
+                        borderWidth: 2.5,
+                        fill: true,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'EMA (50)',
+                        data: chartEma,
+                        borderColor: '#FFB100', // Gold / Orange
+                        borderWidth: 2,
+                        borderDash: [6, 6],
+                        fill: false,
+                        pointRadius: 0,
+                        spanGaps: true
+                    }
+                ]
+            },
+            options: {
+                title: { 
+                    display: true, 
+                    text: `${symbol}/PHP Chart (Last ${visiblePoints} Hrs)`, 
+                    fontSize: 18,
+                    fontColor: '#E2E8F0', // Light Slate Text
+                    fontFamily: 'sans-serif'
+                },
+                legend: { 
+                    position: 'bottom',
+                    labels: {
+                        fontColor: '#94A3B8', // Muted Gray Text
+                        boxWidth: 20
+                    }
+                },
+                scales: {
+                    xAxes: [{ 
+                        ticks: { maxTicksLimit: 6, fontColor: '#64748B' },
+                        gridLines: { color: 'rgba(255, 255, 255, 0.05)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
+                    }],
+                    yAxes: [{ 
+                        ticks: { fontColor: '#64748B' },
+                        gridLines: { color: 'rgba(255, 255, 255, 0.05)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
+                    }]
+                }
+            }
+        };
+
+        const response = await axios.post('https://quickchart.io/chart', {
+            chart: chartConfig,
+            width: 800,
+            height: 400,
+            // Dark aesthetic background matching professional crypto terminals
+            backgroundColor: '#131722', 
+            format: 'png'
+        }, {
+            responseType: 'arraybuffer' // Request raw binary stream (required to send photos inside TG natively)
+        });
+
+        return Buffer.from(response.data);
+    } catch (error) {
+        console.error("Failed to generate chart image:", error.message);
+        return null;
+    }
+}
+
 async function getMarketAnalysis(symbol) {
     try {
         const normalizedSymbol = normalizeSymbol(symbol);
@@ -39,9 +131,7 @@ async function getMarketAnalysis(symbol) {
         const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice).toFixed(2);
 
         // 5. 📊 TREND RULES
-        // Check if price is within 0.5% of the EMA (Sideways)
         const diffPercent = Math.abs((currentPricePHP - currentEMA) / currentEMA) * 100;
-        
         let trendLabel = "";
         let trendIcon = "";
 
@@ -74,11 +164,15 @@ async function getMarketAnalysis(symbol) {
             alert = true;
         }
 
+        // 7. Request chart image creation
+        const chartBuffer = await getChartBuffer(closes, emaValues, baseAsset);
+
         return {
             symbol: baseAsset,
             pair: normalizedSymbol,
             sign,
             recommendation,
+            chartBuffer,
             rsi: currentRSI.toFixed(2),
             ema: Number(currentEMA).toLocaleString('en-US', {
                 minimumFractionDigits: 1,

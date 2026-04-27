@@ -74,6 +74,7 @@ function formatCoinsList(coins) {
     .join('\n');
 }
 
+// Function to send standard text without charts
 async function safeSend(chatId, text, options = {}) {
   try {
     await bot.sendMessage(chatId, text, options);
@@ -81,6 +82,27 @@ async function safeSend(chatId, text, options = {}) {
     console.error('Send message failed:', err.message);
   }
 }
+
+// New Function specifically capable of pairing Images to your alert Captions
+async function safeSendChartAndText(chatId, buffer, caption, options = {}) {
+  try {
+    if (buffer) {
+      await bot.sendPhoto(chatId, buffer, {
+        ...options, 
+        caption: caption
+      }, {
+        filename: 'chart.png', 
+        contentType: 'image/png' 
+      });
+    } else {
+      // Graceful fallback to text formatting in case the image fails to generate
+      await safeSend(chatId, caption, options);
+    }
+  } catch (err) {
+    console.error('Send chart message failed:', err.message);
+  }
+}
+
 
 // =========================
 // POLLING CONTROL
@@ -97,26 +119,18 @@ async function startPolling() {
   try {
     restarting = true;
 
-    // remove webhook
-    await bot.deleteWebHook({
-      drop_pending_updates: true
-    }).catch(() => {});
-
-    // stop stale polling
+    await bot.deleteWebHook({ drop_pending_updates: true }).catch(() => {});
     await bot.stopPolling().catch(() => {});
 
     await bot.startPolling({
       restart: true,
       interval: 2000,
       autoStart: false,
-      params: {
-        timeout: 30
-      }
+      params: { timeout: 30 }
     });
 
     pollingStarted = true;
     reconnectDelay = 5000;
-
     console.log('CoinsBot polling started');
   } catch (err) {
     console.error('Start polling failed:', err.message);
@@ -146,7 +160,6 @@ async function restartPolling(delay = reconnectDelay) {
   pollingStarted = false;
 
   await bot.stopPolling().catch(() => {});
-
   console.log(`Restarting CoinsBot in ${delay / 1000}s...`);
 
   setTimeout(async () => {
@@ -189,7 +202,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
           `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
         ].join('\n');
 
-        await safeSend(targetChatId, message, {
+        await safeSendChartAndText(targetChatId, data.chartBuffer, message, {
           parse_mode: 'Markdown'
         });
       }
@@ -204,7 +217,6 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
 // =========================
 bot.onText(/\/start$/, async msg => {
   isBotActive = true;
-
   await safeSend(
     msg.chat.id,
     '🤖 *CoinsBot Activated*\nMonitoring every hour for Buy dips / Sell bounces.',
@@ -214,42 +226,22 @@ bot.onText(/\/start$/, async msg => {
 
 bot.onText(/\/end$/, async msg => {
   isBotActive = false;
-
-  await safeSend(
-    msg.chat.id,
-    '🛑 *CoinsBot Paused*',
-    { parse_mode: 'Markdown' }
-  );
+  await safeSend(msg.chat.id, '🛑 *CoinsBot Paused*', { parse_mode: 'Markdown' });
 });
 
 bot.onText(/\/restart$/, async msg => {
-  await safeSend(
-    msg.chat.id,
-    '🔄 *Restarting CoinsBot...*',
-    { parse_mode: 'Markdown' }
-  );
-
+  await safeSend(msg.chat.id, '🔄 *Restarting CoinsBot...*', { parse_mode: 'Markdown' });
   await restartPolling(2000);
 });
 
 bot.onText(/\/now$/, async msg => {
-  await safeSend(
-    msg.chat.id,
-    '📡 *Checking latest market data...*',
-    { parse_mode: 'Markdown' }
-  );
-
+  await safeSend(msg.chat.id, '📡 *Fetching real-time market data & Generating Charts...*', { parse_mode: 'Markdown' });
   await processUpdates(true, msg.chat.id);
 });
 
 bot.onText(/\/coins$/, async msg => {
   const formatted = formatCoinsList(coinList);
-
-  await safeSend(
-    msg.chat.id,
-    `📍 *Monitoring:*\n${formatted}`,
-    { parse_mode: 'Markdown' }
-  );
+  await safeSend(msg.chat.id, `📍 *Monitoring:*\n${formatted}`, { parse_mode: 'Markdown' });
 });
 
 bot.onText(/\/price (.+)/, async (msg, match) => {
@@ -261,16 +253,18 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
       return;
     }
 
+    // Acknowledge before computation limits API silence waiting behavior.
+    const noticeMsg = await bot.sendMessage(msg.chat.id, '🛠 Generating report chart...');
+
     const data = await getMarketAnalysis(symbol);
+    bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {}); // cleanup notice msg
 
     if (!data) {
-      await safeSend(msg.chat.id, '❌ Coin not found.');
+      await safeSend(msg.chat.id, '❌ Coin not found on Pro Coins.PH Data base.');
       return;
     }
 
-    await safeSend(
-      msg.chat.id,
-      [
+    const reportMessage = [
         `💰 *${data.pair}*`,
         `${data.sign}`,
         `👉 ${data.recommendation}`,
@@ -278,9 +272,9 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
         `PHP: ₱${data.pricePHP}`,
         `Trend: ${data.trend}`,
         `RSI: ${data.rsi}`
-      ].join('\n'),
-      { parse_mode: 'Markdown' }
-    );
+      ].join('\n');
+
+    await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
   } catch (err) {
     console.error(err.message);
     await safeSend(msg.chat.id, '⚠️ Failed to fetch price.');
@@ -296,9 +290,9 @@ bot.onText(/\/help|\/commands/, async msg => {
       '/start - Start hourly alerts',
       '/end - Stop alerts',
       '/restart - Restart bot polling',
-      '/now - Show market data now',
+      '/now - Show market data now w/ charts',
       '/coins - List tracked coins',
-      '/price [coin] - Quick price check'
+      '/price [coin] - Price check and visual Chart.'
     ].join('\n'),
     { parse_mode: 'Markdown' }
   );
@@ -317,7 +311,6 @@ cron.schedule('0 * * * *', async () => {
 // =========================
 bot.on('polling_error', async (error) => {
   const msg = String(error.message || '');
-
   console.error('Polling error:', error.code, msg);
 
   const recoverable =
@@ -331,22 +324,14 @@ bot.on('polling_error', async (error) => {
     await restartPolling();
     return;
   }
-
   console.log('Non-recoverable polling error.');
 });
 
 // Reset reconnect delay when bot is healthy again
-bot.on('message', () => {
-  reconnectDelay = 5000;
-});
+bot.on('message', () => { reconnectDelay = 5000; });
 
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
-});
+process.on('unhandledRejection', (err) => { console.error('Unhandled rejection:', err); });
+process.on('uncaughtException', (err) => { console.error('Uncaught exception:', err); });
 
 // =========================
 // SHUTDOWN
