@@ -189,7 +189,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
         const message = [
           `${data.sign}`,
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📝 *REC:* ${data.recommendation}`,
+          `📝 *REC:* _${data.recommendation}_`,
           ``,
           `📊 *INDICATORS*`,
           `- Trend: ${data.trend}`,
