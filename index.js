@@ -192,9 +192,10 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
           `📝 *REC:* _${data.recommendation}_`,
           ``,
           `📊 *INDICATORS*`,
-          `- Trend: ${data.trend}`,
+          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
           `- RSI (14): ${data.rsi}`,
-          `- EMA (50): ₱${data.ema}`,
+          `- EMA (50): ₱${data.ema50}`,
+          `- EMA (200): ₱${data.ema200}`,
           ``,
           `💵 *PRICE*`,
           `- PHP: ₱${data.pricePHP}`,
@@ -219,7 +220,7 @@ bot.onText(/\/start$/, async msg => {
   isBotActive = true;
   await safeSend(
     msg.chat.id,
-    '🤖 *CoinsBot Activated*\nMonitoring every hour for Buy dips / Sell bounces.',
+    '🤖 *CoinsBot Activated*\nMonitoring every hour for strategic entry/exit zones.',
     { parse_mode: 'Markdown' }
   );
 });
@@ -253,11 +254,10 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
       return;
     }
 
-    // Acknowledge before computation limits API silence waiting behavior.
     const noticeMsg = await bot.sendMessage(msg.chat.id, '🛠 Generating report chart...');
 
     const data = await getMarketAnalysis(symbol);
-    bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {}); // cleanup notice msg
+    bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {});
 
     if (!data) {
       await safeSend(msg.chat.id, '❌ Coin not found on Pro Coins.PH Data base.');
@@ -265,15 +265,22 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     }
 
     const reportMessage = [
-        `💰 *${data.pair}*`,
         `${data.sign}`,
-        `👉 ${data.recommendation}`,
-        `USDT: $${data.priceUSDT}`,
-        `PHP: ₱${data.pricePHP}`,
-        `Trend: ${data.trend}`,
-        `RSI: ${data.rsi}`
-      ].join('\n');
-
+          `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
+          `📝 *REC:* _${data.recommendation}_`,
+          ``,
+          `📊 *INDICATORS*`,
+          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
+          `- RSI (14): ${data.rsi}`,
+          `- EMA (50): ₱${data.ema50}`,
+          `- EMA (200): ₱${data.ema200}`,
+          ``,
+          `💵 *PRICE*`,
+          `- PHP: ₱${data.pricePHP}`,
+          `- USDT: $${data.priceUSDT}`,
+          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
+        ].join('\n');
+        
     await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
   } catch (err) {
     console.error(err.message);
@@ -327,7 +334,6 @@ bot.on('polling_error', async (error) => {
   console.log('Non-recoverable polling error.');
 });
 
-// Reset reconnect delay when bot is healthy again
 bot.on('message', () => { reconnectDelay = 5000; });
 
 process.on('unhandledRejection', (err) => { console.error('Unhandled rejection:', err); });

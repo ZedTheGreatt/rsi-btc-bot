@@ -11,43 +11,40 @@ function normalizeSymbol(rawSymbol) {
 /**
  * Generates an Image Chart from QuickChart.io using our market arrays
  * @param {number[]} closes - Array of closing prices.
- * @param {number[]} emaValues - Array of EMA values.
+ * @param {number[]} ema50Values - Array of EMA 50 values.
+ * @param {number[]} ema200Values - Array of EMA 200 values.
  * @param {number[]} rsiValues - Array of RSI values.
  * @param {string} pair - The full trading pair symbol (e.g., 'BTCUSDT').
  * @returns {Promise<Buffer|null>} A buffer containing the chart image, or null on error.
  */
-async function getChartBuffer(closes, emaValues, rsiValues, pair) {
+async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair) {
     try {
-        // Ensure EMA & RSI arrays map to the exact same points in the Closes timeline
-        const alignedEma = emaValues.length >= closes.length
-            ? emaValues.slice(-closes.length)
-            : [...new Array(closes.length - emaValues.length).fill(null), ...emaValues];
+        // --- Align all indicator arrays to match the closing prices timeline ---
+        const align = (values, length) =>
+            values.length >= length
+                ? values.slice(-length)
+                : [...new Array(length - values.length).fill(null), ...values];
 
-        const rsiPadding = closes.length - rsiValues.length;
-        const alignedRsi = [...(new Array(Math.max(0, rsiPadding)).fill(null)), ...rsiValues];
+        const alignedEma50 = align(ema50Values, closes.length);
+        const alignedEma200 = align(ema200Values, closes.length);
+        const alignedRsi = align(rsiValues, closes.length);
 
-        const visiblePoints = 72;
+        const visiblePoints = 72; // Show 4 days of hourly data
         const chartCloses = closes.slice(-visiblePoints);
-        const chartEma = alignedEma.slice(-visiblePoints);
+        const chartEma50 = alignedEma50.slice(-visiblePoints);
+        const chartEma200 = alignedEma200.slice(-visiblePoints);
         const chartRsi = alignedRsi.slice(-visiblePoints);
         
-        // Form generic bottom labels (-71h, -70h... -1h, NOW)
         const labels = Array.from({ length: chartCloses.length }, (_, i) => 
             i === chartCloses.length - 0 ? 'NOW' : `-${chartCloses.length - 0 - i}h`
         );
 
-        // ============================================
-        // SPLIT CHART MATH: 60% Price top, 40% RSI bottom
-        // ============================================
         // Safely extract min/max to prevent QuickChart "Infinity" 400 errors
-        const validPrices = [...chartCloses, ...chartEma].filter(v => typeof v === 'number' && !isNaN(v));
+        const validPrices = [...chartCloses, ...chartEma50, ...chartEma200].filter(v => typeof v === 'number' && !isNaN(v));
         const minPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0;
         const maxPrice = validPrices.length > 0 ? Math.max(...validPrices) : 100;
         const priceRange = (maxPrice - minPrice) === 0 ? (maxPrice * 0.01 || 1) : (maxPrice - minPrice);
 
-        // ============================================
-        // AESTHETICS: Dark Mode / TradingView Style
-        // ============================================
         const chartConfig = {
             type: 'line',
             data: {
@@ -57,8 +54,8 @@ async function getChartBuffer(closes, emaValues, rsiValues, pair) {
                         label: 'Price',
                         yAxisID: 'yPrice',
                         data: chartCloses,
-                        borderColor: 'rgba(41, 98, 255, 1)', // IMPROVED: Vibrant blue for price
-                        backgroundColor: 'rgba(41, 98, 255, 0.1)', // IMPROVED: Matching transparent blue fill
+                        borderColor: 'rgba(41, 98, 255, 1)',
+                        backgroundColor: 'rgba(41, 98, 255, 0.1)',
                         borderWidth: 2,
                         fill: true,
                         pointRadius: 0
@@ -66,33 +63,41 @@ async function getChartBuffer(closes, emaValues, rsiValues, pair) {
                     {
                         label: 'EMA (50)',
                         yAxisID: 'yPrice',
-                        data: chartEma,
-                        borderColor: '#FBBF24', // IMPROVED: Bright orange for EMA
+                        data: chartEma50,
+                        borderColor: '#FBBF24',
                         borderWidth: 1.5,
                         fill: false,
                         pointRadius: 0,
                         spanGaps: true,
-                        tension: 0.2
+                    },
+                    {
+                        label: 'EMA (200)',
+                        yAxisID: 'yPrice',
+                        data: chartEma200,
+                        borderColor: '#ef4444', // Light purple for EMA 200
+                        borderWidth: 1.5,
+                        fill: false,
+                        pointRadius: 0,
+                        spanGaps: true,
                     },
                     {
                         label: 'RSI (14)',
                         yAxisID: 'yRsi',
                         data: chartRsi,
-                        borderColor: '#f75555', // IMPROVED: Deep purple for RSI
-                        borderWidth: 2,
+                        borderColor: '#10b981', // Rose color for RSI
+                        borderWidth: 1.5,
                         fill: false,
                         pointRadius: 0,
-                        tension: 0.3
+                        tension: 0.4
                     }
                 ]
             },
             options: {
                 title: { 
                     display: true, 
-                    // UPDATED: Now uses the full pair for a more accurate title
-                    text: `${pair} Chart (Last ${visiblePoints} Hrs)`, 
+                    text: `Coins.ph ${pair} Chart (Last ${visiblePoints} Hrs)`, 
                     fontSize: 18,
-                    fontColor: '#EAECEF', // IMPROVED: Slightly brighter title color
+                    fontColor: '#EAECEF',
                     fontFamily: 'sans-serif'
                 },
                 legend: { 
@@ -101,16 +106,15 @@ async function getChartBuffer(closes, emaValues, rsiValues, pair) {
                 },
                 scales: {
                     xAxes: [{ 
-                        ticks: { maxTicksLimit: 6, fontColor: '#64748B' },
+                        ticks: { maxTicksLimit: 8, fontColor: '#64748B' },
                         gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
                     }],
                     yAxes: [
                         { 
                             id: 'yPrice',
-                            position: 'right', // Put price on right like TradingView
+                            position: 'right',
                             ticks: { 
                                 fontColor: '#64748B',
-                                // This math pads the bottom with ~40% empty space so the RSI chart fits cleanly underneath
                                 min: minPrice - (priceRange * 0.733),
                                 max: maxPrice + (priceRange * 0.1)
                             },
@@ -122,65 +126,29 @@ async function getChartBuffer(closes, emaValues, rsiValues, pair) {
                             ticks: {
                                 min: 0,
                                 max: 250,
-
-                                callback: function(value) {
-                                // Only return a value if it's in the 0-100 range
-                                if (value <= 100) {
-                                    return value;
-                                }
-                                // For anything above 100, return null to hide it completely
-                                return null;
-                            },
-
+                                callback: (value) => (value <= 100 ? value : null),
                                 fontColor: '#64748B'
                             },
-                            gridLines: {
-                                drawOnChartArea: false
-                            }
+                            gridLines: { drawOnChartArea: false }
                         }
                     ]
                 },
-                // V2 Compatible Annotations for Overbought / Oversold
                 annotation: {
                     annotations: [
-                        {
-                            type: 'line',
-                            mode: 'horizontal',
-                            scaleID: 'yRsi', 
-                            value: 70,
-                            borderColor: '#ef4444', // Red Overbought line
-                            borderWidth: 1.5,
-                            borderDash: [4, 4]
-                        },
-                        {
-                            type: 'line',
-                            mode: 'horizontal',
-                            scaleID: 'yRsi', 
-                            value: 30,
-                            borderColor: '#10b981', // Green Oversold line
-                            borderWidth: 1.5,
-                            borderDash: [4, 4]
-                        }
+                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 70, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4] },
+                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 30, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4] }
                     ]
                 }
             }
         };
 
         const response = await axios.post('https://quickchart.io/chart', {
-            chart: chartConfig,
-            width: 600,
-            height: 400, 
-            backgroundColor: '#131722', 
-            format: 'png'
-        }, {
-            responseType: 'arraybuffer'
-        });
+            chart: chartConfig, width: 600, height: 400, backgroundColor: '#131722', format: 'png'
+        }, { responseType: 'arraybuffer' });
 
         return Buffer.from(response.data);
     } catch (error) {
-        const errorMessage = error.response && error.response.data 
-            ? error.response.data.toString() 
-            : error.message;
+        const errorMessage = error.response?.data?.toString() || error.message;
         console.error("Failed to generate chart image:", errorMessage);
         return null;
     }
@@ -192,11 +160,11 @@ async function getMarketAnalysis(symbol) {
         const baseAsset = normalizedSymbol.replace(/(USDT|USD|PHP)$/, '');
         const usdtSymbol = `${baseAsset}USDT`;
 
-        // 1. Fetch Klines (OHLCV) - 1 hour interval
-        const klineUrl = `https://api.pro.coins.ph/openapi/v1/klines?symbol=${normalizedSymbol}&interval=1h&limit=100`;
+        // 1. Fetch Klines - Increased limit for EMA 200
+        const klineUrl = `https://api.pro.coins.ph/openapi/v1/klines?symbol=${normalizedSymbol}&interval=1h&limit=300`;
         const klineResp = await axios.get(klineUrl);
         
-        // 2. Fetch 24h Ticker for Change %
+        // 2. Fetch Tickers
         const tickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${normalizedSymbol}`;
         const tickerResp = await axios.get(tickerUrl);
         const usdtTickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${usdtSymbol}`;
@@ -208,48 +176,54 @@ async function getMarketAnalysis(symbol) {
 
         // 3. Technical Indicators
         const rsiValues = RSI.calculate({ values: closes, period: 14 });
-        const emaValues = EMA.calculate({ values: closes, period: 50 });
+        const ema50Values = EMA.calculate({ values: closes, period: 50 });
+        const ema200Values = EMA.calculate({ values: closes, period: 200 });
 
         const currentRSI = rsiValues[rsiValues.length - 1];
-        const currentEMA = emaValues[emaValues.length - 1];
+        const currentEMA50 = ema50Values[ema50Values.length - 1];
+        const currentEMA200 = ema200Values[ema200Values.length - 1];
+        const prevEMA50 = ema50Values[ema50Values.length - 2];
 
-        // 4. USDT Price (Live Market Pair)
+        // 4. USDT Price
         const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice).toFixed(2);
 
-        // 5. 📊 TREND RULES
-        const diffPercent = Math.abs((currentPricePHP - currentEMA) / currentEMA) * 100;
-        let trendLabel = "";
-        let trendIcon = "";
-
-        if (diffPercent < 0.5) {
-            trendLabel = "SIDEWAYS";
-            trendIcon = "⚪";
-        } else if (currentPricePHP > currentEMA) {
-            trendLabel = "UPTREND";
-            trendIcon = "📈";
-        } else {
-            trendLabel = "DOWNTREND";
-            trendIcon = "📉";
-        }
-
-        // 6. ZONE STRATEGY LOGIC
-        let sign = "⚪ [NEUTRAL / HOLD] ⚪";
-        let recommendation = "No clear edge, wait";
+        // 5. NEW 5-TIER STRATEGY LOGIC
+        let sign = "⚪ [HOLD] ⚪";
+        let recommendation = "No strong direction, wait for confirmation.";
         let alert = false;
+        
+        const isBullTrend = currentEMA50 > currentEMA200;
+        const isBearTrend = currentEMA50 < currentEMA200;
+        const isEma50Rising = currentEMA50 >= prevEMA50;
 
-        if (currentRSI < 35 && trendLabel === "UPTREND") { 
-            sign = "🟢 [BUY ZONE] 🟢"; 
-            recommendation = "Buy dips in uptrend";
+        if (currentRSI < 30 && currentPricePHP >= currentEMA50 && isBullTrend) {
+            sign = "🟢🟢 [STRONG BUY] 🟢🟢";
+            recommendation = "Oversold in a confirmed uptrend. Prime reversal opportunity.";
             alert = true;
-        } else if (currentRSI > 65 && trendLabel === "DOWNTREND") { 
-            sign = "🔴 [SELL ZONE] 🔴"; 
-            recommendation = "Sell bounces in downtrend";
+        } else if (currentRSI > 70 && currentPricePHP < currentEMA50 && isBearTrend) {
+            sign = "🔴🔴 [STRONG SELL] 🔴🔴";
+            recommendation = "Overbought in a confirmed downtrend. Prime exit opportunity.";
+            alert = true;
+        } else if (currentRSI >= 30 && currentRSI < 45 && currentPricePHP > (currentEMA50 * 0.99) && (isEma50Rising || isBullTrend)) {
+            sign = "🟢 [BUY ZONE] 🟢";
+            recommendation = "Early entry zone as upward momentum may be forming.";
+            alert = true;
+        } else if (currentRSI > 55 && currentRSI <= 70 && currentPricePHP < (currentEMA50 * 1.01) && !isEma50Rising) {
+            sign = "🔴 [SELL ZONE] 🔴";
+            recommendation = "Weakness showing; a possible down move may be forming.";
             alert = true;
         }
+        
+        // <<< ADD THIS BLOCK TO CALCULATE THE TREND LABEL
+        let trend = "⚪ SIDEWAYS";
+        if (isBullTrend) trend = "📈 UPTREND";
+        else if (isBearTrend) trend = "📉 DOWNTREND";
+        // <<< END OF ADDED BLOCK
 
-        // 7. Request chart image creation
-        // UPDATED: Pass the full 'normalizedSymbol' for a more accurate chart title
-        const chartBuffer = await getChartBuffer(closes, emaValues, rsiValues, normalizedSymbol);
+        // 6. Request chart image creation
+        const chartBuffer = await getChartBuffer(closes, ema50Values, ema200Values, rsiValues, normalizedSymbol);
+
+        const formatNumber = (num) => Number(num).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
         return {
             symbol: baseAsset,
@@ -258,21 +232,13 @@ async function getMarketAnalysis(symbol) {
             recommendation,
             chartBuffer,
             rsi: currentRSI.toFixed(2),
-            ema: Number(currentEMA).toLocaleString('en-US', {
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1
-            }),
-            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', {
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1
-            }),
-            priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', {
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1
-            }),
+            ema50: formatNumber(currentEMA50),
+            ema200: formatNumber(currentEMA200),
+            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+            priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             change: change24h,
             alert,
-            trend: `${trendIcon} ${trendLabel}`
+            trend, // <<< ADD THIS PROPERTY TO THE RETURNED OBJECT
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);
