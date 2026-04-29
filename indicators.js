@@ -1,273 +1,225 @@
 const axios = require('axios');
 const { SMA, ATR } = require('technicalindicators');
 
-function normalizeSymbol(rawSymbol) {
-    const symbol = String(rawSymbol || '').toUpperCase().trim();
-    if (symbol.endsWith('USDT')) return symbol;
-    if (symbol.endsWith('USD')) return `${symbol}T`;
-    return symbol;
+const puppeteer = require('puppeteer');
+
+// =========================
+// SYMBOL NORMALIZER
+// =========================
+function normalizeSymbol(sym) {
+  sym = String(sym || '').toUpperCase().trim();
+
+  if (!sym) return null;
+  if (sym.endsWith('USDT')) return sym;
+  if (sym.endsWith('USD')) return `${sym}T`;
+  if (sym.endsWith('PHP')) return sym;
+
+  return `${sym}PHP`;
 }
 
-/**
- * Calculates the GainzAlgo indicator value. This is a proxy for momentum.
- */
-function calculateGainzAlgo(klines) {
-    if (!klines || klines.length < 20) return [];
-    
-    const volumes = klines.map(k => parseFloat(k[5]));
-    const volumeSma20 = SMA.calculate({ period: 20, values: volumes });
-    const alignedSma = [...new Array(klines.length - volumeSma20.length).fill(null), ...volumeSma20];
+// =========================
+// GAINZALGO V2 CORE
+// =========================
+function gainzAlgo(klines) {
+  const closes = klines.map(k => +k[4]);
+  const volumes = klines.map(k => +k[5]);
 
-    return klines.map((kline, index) => {
-        const high = parseFloat(kline[2]);
-        const low = parseFloat(kline[3]);
-        const close = parseFloat(kline[4]);
-        const volume = parseFloat(kline[5]);
-        const smaVol = alignedSma[index];
-        if (smaVol === null || smaVol === 0) return 0;
-        const range = high - low;
-        if (range === 0) return 0;
-        const momentumScore = ((close - low) - (high - close)) / range;
-        const volatilityFactor = range / close;
-        const volumeStrength = volume / smaVol;
-        return momentumScore * volatilityFactor * volumeStrength * 100;
-    });
+  const smaVol = SMA.calculate({ period: 20, values: volumes });
+  const aligned = [...Array(closes.length - smaVol.length).fill(null), ...smaVol];
+
+  return klines.map((k, i) => {
+    const high = +k[2];
+    const low = +k[3];
+    const close = +k[4];
+    const vol = +k[5];
+
+    const volAvg = aligned[i];
+    if (!volAvg) return 0;
+
+    const range = high - low || 1;
+
+    const momentum = ((close - low) - (high - close)) / range;
+    const strength = vol / volAvg;
+
+    return momentum * strength * 100;
+  });
 }
 
-/**
- * Generates discrete BUY/SELL signals based on GainzAlgo logic.
- * Also calculates TP and SL.
- */
-function generateSignals(klines, gainzAlgoValues) {
-    const signals = [];
-    if (klines.length < 20) return signals;
+// =========================
+// SIGNAL ENGINE (V2 IMPROVED)
+// =========================
+function signals(klines, ga) {
+  const result = [];
 
-    const atrInput = {
-        high: klines.map(k => parseFloat(k[2])),
-        low: klines.map(k => parseFloat(k[3])),
-        close: klines.map(k => parseFloat(k[4])),
-        period: 14
-    };
-    const atrValues = ATR.calculate(atrInput);
-    // Align ATR to match klines array length
-    const alignedAtr = [...new Array(klines.length - atrValues.length).fill(0), ...atrValues];
+  const atr = ATR.calculate({
+    high: klines.map(k => +k[2]),
+    low: klines.map(k => +k[3]),
+    close: klines.map(k => +k[4]),
+    period: 14
+  });
 
-    const buyThreshold = 1.0;
-    const sellThreshold = -1.0;
+  const atrA = [...Array(klines.length - atr.length).fill(0), ...atr];
 
-    for (let i = 1; i < gainzAlgoValues.length; i++) {
-        const prevValue = gainzAlgoValues[i - 1];
-        const currentValue = gainzAlgoValues[i];
-        const kline = klines[i];
-        const closePrice = parseFloat(kline[4]);
-        const atr = alignedAtr[i] || (parseFloat(kline[2]) - parseFloat(kline[3]));
-        
-        let signal = null;
+  const sma50 = SMA.calculate({
+    period: 50,
+    values: klines.map(k => +k[4])
+  });
 
-        // Buy Signal: Crosses up through the buy threshold
-        if (prevValue < buyThreshold && currentValue >= buyThreshold) {
-            signal = {
-                type: 'BUY',
-                time: parseInt(kline[0]),
-                price: closePrice,
-                sl: (closePrice - atr * 1.5).toFixed(4),
-                tp: (closePrice + atr * 2.0).toFixed(4),
-            };
-        }
-        // Sell Signal: Crosses down through the sell threshold
-        else if (prevValue > sellThreshold && currentValue <= sellThreshold) {
-            signal = {
-                type: 'SELL',
-                time: parseInt(kline[0]),
-                price: closePrice,
-                sl: (closePrice + atr * 1.5).toFixed(4),
-                tp: (closePrice - atr * 2.0).toFixed(4),
-            };
-        }
+  const smaA = [...Array(klines.length - sma50.length).fill(null), ...sma50];
 
-        if (signal) signals.push(signal);
-    }
-    return signals;
-}
+  const buyT = 1.5;
+  const sellT = -1.5;
 
-/**
- * Generates a Candlestick Chart with GainzAlgo BUY/SELL signals plotted.
- */
-async function getChartBuffer(klines, signals, pair) {
-    if (!klines || klines.length === 0) {
-        console.error(`Chart generation skipped for ${pair}: No kline data.`);
-        return null;
+  for (let i = 1; i < klines.length; i++) {
+    const prev = ga[i - 1];
+    const cur = ga[i];
+
+    const close = +klines[i][4];
+    const time = +klines[i][0];
+
+    const trendUp = smaA[i] && close > smaA[i];
+    const trendDown = smaA[i] && close < smaA[i];
+
+    const a = atrA[i] || 0;
+
+    let sig = null;
+
+    if (prev < buyT && cur >= buyT && trendUp) {
+      sig = {
+        type: 'BUY',
+        time,
+        price: close,
+        tp: close + a * 2,
+        sl: close - a * 1.5
+      };
     }
 
-    try {
-        const visiblePoints = 90; // Show last 90 hours
-        const recentKlines = klines.slice(-visiblePoints);
-        const startTime = recentKlines[0] ? parseInt(recentKlines[0][0]) : 0;
-
-        // Filter signals to only those visible on the chart
-        const visibleSignals = signals.filter(s => s.time >= startTime);
-
-        const candlestickData = recentKlines.map(k => ({
-            x: parseInt(k[0]),
-            o: parseFloat(k[1]), h: parseFloat(k[2]),
-            l: parseFloat(k[3]), c: parseFloat(k[4]),
-        }));
-
-        const buySignalsData = visibleSignals.filter(s => s.type === 'BUY').map(s => ({
-            x: s.time,
-            y: parseFloat(s.sl) * 0.998 // Position slightly below the candle
-        }));
-
-        const sellSignalsData = visibleSignals.filter(s => s.type === 'SELL').map(s => ({
-            x: s.time,
-            y: parseFloat(s.sl) * 1.002 // Position slightly above the candle
-        }));
-
-        const chartConfig = {
-            type: 'candlestick',
-            data: {
-                datasets: [
-                    {
-                        label: 'Price',
-                        data: candlestickData,
-                    },
-                    {
-                        label: 'Buy Signals',
-                        type: 'scatter',
-                        data: buySignalsData,
-                        backgroundColor: '#10B981',
-                        pointStyle: 'triangle',
-                        rotation: 0,
-                        radius: 8,
-                    },
-                    {
-                        label: 'Sell Signals',
-                        type: 'scatter',
-                        data: sellSignalsData,
-                        backgroundColor: '#EF4444',
-                        pointStyle: 'triangle',
-                        rotation: 180,
-                        radius: 8,
-                    }
-                ]
-            },
-            options: {
-                title: { 
-                    display: true, 
-                    text: `Coins.ph ${pair} Chart with GainzAlgo Signals`, 
-                    fontSize: 18, fontColor: '#EAECEF'
-                },
-                legend: { display: false },
-                scales: {
-                    xAxes: [{ 
-                        type: 'time',
-                        time: { unit: 'day', tooltipFormat: 'll HH:mm' },
-                        ticks: { fontColor: '#64748B' },
-                        gridLines: { color: 'rgba(255, 255, 255, 0.07)' }
-                    }],
-                    yAxes: [{ 
-                        position: 'right',
-                        ticks: { fontColor: '#64748B' },
-                        gridLines: { color: 'rgba(255, 255, 255, 0.07)' }
-                    }]
-                },
-                plugins: {
-                    financial: true, // Enable candlestick plugin
-                    datalabels: { // Configure labels for signals
-                        display: (context) => context.dataset.label.includes('Signals'),
-                        align: (context) => context.dataset.label.includes('Buy') ? 'bottom' : 'top',
-                        color: 'white',
-                        font: { weight: 'bold' },
-                        formatter: (value, context) => {
-                            const signal = visibleSignals.find(s => s.time === value.x);
-                            if (!signal) return '';
-                            // Return multi-line text
-                            return `${signal.type}\nTP: ${signal.tp}\nSL: ${signal.sl}`;
-                        }
-                    }
-                }
-            }
-        };
-
-        const response = await axios.post('https://quickchart.io/chart', {
-            chart: chartConfig, width: 600, height: 400, backgroundColor: '#131722', format: 'png'
-        }, { responseType: 'arraybuffer' });
-
-        return Buffer.from(response.data);
-    } catch (error) {
-        const errorMessage = error.response?.data?.toString() || error.message;
-        console.error(`Failed to generate chart image for ${pair}:`, errorMessage);
-        return null;
+    if (prev > sellT && cur <= sellT && trendDown) {
+      sig = {
+        type: 'SELL',
+        time,
+        price: close,
+        tp: close - a * 2,
+        sl: close + a * 1.5
+      };
     }
+
+    if (sig) result.push(sig);
+  }
+
+  return result;
 }
 
+// =========================
+// CANDLE CHART (PUPPETEER)
+// =========================
+async function renderChart(klines, sigs, pair) {
+  const browser = await puppeteer.launch({
+    args: ['--no-sandbox']
+  });
 
+  const page = await browser.newPage();
+
+  const candles = klines.slice(-80).map(k => ({
+    x: +k[0],
+    o: +k[1],
+    h: +k[2],
+    l: +k[3],
+    c: +k[4]
+  }));
+
+  const buys = sigs.filter(s => s.type === 'BUY');
+  const sells = sigs.filter(s => s.type === 'SELL');
+
+  await page.setContent(`
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
+</head>
+<body style="background:#0b0f14">
+<canvas id="c"></canvas>
+<script>
+const ctx = document.getElementById('c');
+
+new Chart(ctx, {
+  type: 'candlestick',
+  data: {
+    datasets: [{
+      label: '${pair}',
+      data: ${JSON.stringify(candles)}
+    },{
+      type:'scatter',
+      label:'BUY',
+      data:${JSON.stringify(buys.map(b => ({x:b.time,y:b.price})))},
+      backgroundColor:'lime',
+      pointRadius:6
+    },{
+      type:'scatter',
+      label:'SELL',
+      data:${JSON.stringify(sells.map(s => ({x:s.time,y:s.price})))},
+      backgroundColor:'red',
+      pointRadius:6
+    }]
+  },
+  options:{
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{type:'time'},
+      y:{position:'right'}
+    }
+  }
+});
+</script>
+</body>
+</html>`);
+
+  const buffer = await page.screenshot({ fullPage: true });
+
+  await browser.close();
+  return buffer;
+}
+
+// =========================
+// MAIN ANALYSIS
+// =========================
 async function getMarketAnalysis(symbol) {
-    try {
-        const normalizedSymbol = normalizeSymbol(symbol);
-        const baseAsset = normalizedSymbol.replace(/(USDT|USD|PHP)$/, '');
-        const usdtSymbol = `${baseAsset}USDT`;
+  try {
+    const s = normalizeSymbol(symbol);
 
-        const klineUrl = `https://api.pro.coins.ph/openapi/v1/klines?symbol=${normalizedSymbol}&interval=1h&limit=300`;
-        const klineResp = await axios.get(klineUrl);
-        const klines = klineResp.data;
+    const kl = await axios.get(
+      `https://api.pro.coins.ph/openapi/v1/klines?symbol=${s}&interval=1h&limit=200`
+    );
 
-        if (!klines || klines.length < 20) {
-            console.warn(`Insufficient kline data for ${normalizedSymbol}.`);
-            return null;
-        }
+    const klines = kl.data;
+    const ga = gainzAlgo(klines);
+    const sig = signals(klines, ga);
 
-        const tickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${normalizedSymbol}`;
-        const tickerResp = await axios.get(tickerUrl);
-        const usdtTickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${usdtSymbol}`;
-        const usdtTickerResp = await axios.get(usdtTickerUrl);
+    const last = sig[sig.length - 1];
+    const close = +klines.at(-1)[4];
 
-        const gainzAlgoValues = calculateGainzAlgo(klines);
-        const signals = generateSignals(klines, gainzAlgoValues);
-        const latestSignal = signals.length > 0 ? signals[signals.length - 1] : null;
-        
-        // Alert only if a new signal appeared on the most recent completed candle
-        const lastKlineTime = klines[klines.length - 2][0]; // Check the last *closed* candle
-        const newSignalOccurred = latestSignal && latestSignal.time === lastKlineTime;
-        
-        let sign = "⚪ [HOLD] ⚪";
-        let recommendation = "No new signal. Monitoring market conditions.";
-        
-        if (newSignalOccurred) {
-            if (latestSignal.type === 'BUY') {
-                sign = "🟢🟢 [NEW BUY SIGNAL] 🟢🟢";
-                recommendation = `Entry at ~${latestSignal.price}. TP: ${latestSignal.tp}, SL: ${latestSignal.sl}.`;
-            } else {
-                sign = "🔴🔴 [NEW SELL SIGNAL] 🔴🔴";
-                recommendation = `Entry at ~${latestSignal.price}. TP: ${latestSignal.tp}, SL: ${latestSignal.sl}.`;
-            }
-        }
+    const alert = last && klines.at(-2)[0] === last.time;
 
-        const chartBuffer = await getChartBuffer(klines, signals, normalizedSymbol);
-        
-        const currentPricePHP = parseFloat(tickerResp.data.lastPrice);
-        const change24h = tickerResp.data.priceChangePercent;
-        const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice);
+    const chart = await renderChart(klines, sig, s);
 
-        return {
-            symbol: baseAsset,
-            sign,
-            recommendation,
-            chartBuffer,
-            gainzAlgo: gainzAlgoValues[gainzAlgoValues.length-1].toFixed(3),
-            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            change: change24h,
-            alert: newSignalOccurred, // Alert is now true only on a new signal
-        };
-    } catch (error) {
-        if (error.response && error.response.status === 400) {
-            console.warn(`Could not fetch market data for ${symbol}. It may not be a valid pair.`);
-        } else {
-            console.error(`Indicator Error (${symbol}):`, error.message);
-        }
-        return null;
-    }
+    return {
+      symbol: s,
+      sign: alert ? `🚨 ${last.type} SIGNAL` : '⚪ HOLD',
+      recommendation: last
+        ? `${last.type} @ ${last.price}`
+        : 'No signal',
+      gainzAlgo: ga.at(-1).toFixed(2),
+      pricePHP: close.toFixed(2),
+      priceUSDT: close.toFixed(2),
+      change: 0,
+      chartBuffer: chart,
+      alert
+    };
+
+  } catch (e) {
+    console.error(e.message);
+    return null;
+  }
 }
 
 module.exports = { getMarketAnalysis };
