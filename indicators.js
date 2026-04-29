@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { RSI, EMA } = require('technicalindicators');
+const { SMA } = require('technicalindicators');
 
 function normalizeSymbol(rawSymbol) {
     const symbol = String(rawSymbol || '').toUpperCase().trim();
@@ -9,86 +9,103 @@ function normalizeSymbol(rawSymbol) {
 }
 
 /**
- * Generates an Image Chart from QuickChart.io using our market arrays
- * @param {number[]} closes - Array of closing prices.
- * @param {number[]} ema50Values - Array of EMA 50 values.
- * @param {number[]} ema200Values - Array of EMA 200 values.
- * @param {number[]} rsiValues - Array of RSI values.
+ * Calculates the GainzAlgo indicator value for each kline.
+ * GainzAlgo combines momentum, volatility, and volume strength.
+ * @param {Array} klines - Array of kline data [timestamp, open, high, low, close, volume].
+ * @returns {Array} An array of GainzAlgo values.
+ */
+function calculateGainzAlgo(klines) {
+    if (!klines || klines.length < 20) {
+        // Not enough data to calculate
+        return [];
+    }
+
+    const volumes = klines.map(k => parseFloat(k[5]));
+    const volumeSma20 = SMA.calculate({ period: 20, values: volumes });
+
+    // Align SMA to have the same length as klines by padding at the start
+    const alignedSma = [...new Array(klines.length - volumeSma20.length).fill(null), ...volumeSma20];
+
+    const gainzAlgoValues = klines.map((kline, index) => {
+        const high = parseFloat(kline[2]);
+        const low = parseFloat(kline[3]);
+        const close = parseFloat(kline[4]);
+        const volume = parseFloat(kline[5]);
+        const smaVol = alignedSma[index];
+
+        if (smaVol === null || smaVol === 0) return 0; // Skip if no SMA value yet
+
+        const range = high - low;
+        if (range === 0) return 0; // Avoid division by zero for doji candles
+
+        // 1. Momentum Score (MS): Where did the price close within the candle's range? (-1 to +1)
+        const momentumScore = ((close - low) - (high - close)) / range;
+
+        // 2. Volatility Factor (VF): How large is the candle relative to its closing price?
+        const volatilityFactor = range / close;
+        
+        // 3. Volume Strength (VS): Is the current volume above or below average?
+        const volumeStrength = volume / smaVol;
+
+        // Final Calculation
+        const gainzAlgo = momentumScore * volatilityFactor * volumeStrength * 100;
+        return gainzAlgo;
+    });
+
+    return gainzAlgoValues;
+}
+
+
+/**
+ * Generates a Candlestick Chart with the GainzAlgo indicator from QuickChart.io.
+ * @param {Array} klines - Raw kline data from the API.
+ * @param {number[]} gainzAlgoValues - Array of GainzAlgo values.
  * @param {string} pair - The full trading pair symbol (e.g., 'BTCUSDT').
  * @returns {Promise<Buffer|null>} A buffer containing the chart image, or null on error.
  */
-async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair) {
+async function getChartBuffer(klines, gainzAlgoValues, pair) {
     try {
-        // --- Align all indicator arrays to match the closing prices timeline ---
-        const align = (values, length) =>
-            values.length >= length
-                ? values.slice(-length)
-                : [...new Array(length - values.length).fill(null), ...values];
-
-        const alignedEma50 = align(ema50Values, closes.length);
-        const alignedEma200 = align(ema200Values, closes.length);
-        const alignedRsi = align(rsiValues, closes.length);
-
-        const visiblePoints = 72; // Show 4 days of hourly data
-        const chartCloses = closes.slice(-visiblePoints);
-        const chartEma50 = alignedEma50.slice(-visiblePoints);
-        const chartEma200 = alignedEma200.slice(-visiblePoints);
-        const chartRsi = alignedRsi.slice(-visiblePoints);
+        const visiblePoints = 72; // Show last 72 hours (3 days)
+        const recentKlines = klines.slice(-visiblePoints);
+        const recentGainzAlgo = gainzAlgoValues.slice(-visiblePoints);
         
-        const labels = Array.from({ length: chartCloses.length }, (_, i) => 
-            i === chartCloses.length - 0 ? 'NOW' : `-${chartCloses.length - 0 - i}h`
-        );
+        const candlestickData = recentKlines.map(k => ({
+            x: parseInt(k[0]), // timestamp
+            o: parseFloat(k[1]),
+            h: parseFloat(k[2]),
+            l: parseFloat(k[3]),
+            c: parseFloat(k[4]),
+        }));
 
+        const gainzAlgoChartData = recentGainzAlgo.map((value, index) => ({
+            x: candlestickData[index].x,
+            y: value,
+            backgroundColor: value >= 0 ? 'rgba(16, 185, 129, 0.7)' : 'rgba(239, 68, 68, 0.7)',
+            borderColor: value >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)',
+        }));
+        
         // Safely extract min/max to prevent QuickChart "Infinity" 400 errors
-        const validPrices = [...chartCloses, ...chartEma50, ...chartEma200].filter(v => typeof v === 'number' && !isNaN(v));
+        const validPrices = recentKlines.flatMap(k => [parseFloat(k[2]), parseFloat(k[3])]);
         const minPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0;
         const maxPrice = validPrices.length > 0 ? Math.max(...validPrices) : 100;
-        const priceRange = (maxPrice - minPrice) === 0 ? (maxPrice * 0.01 || 1) : (maxPrice - minPrice);
+        const priceRange = maxPrice - minPrice;
 
         const chartConfig = {
-            type: 'line',
+            type: 'bar', // Set to bar, but will be overridden by candlestick dataset
             data: {
-                labels: labels,
                 datasets: [
                     {
-                        label: 'Price',
+                        type: 'candlestick',
+                        label: 'Price (OHLC)',
                         yAxisID: 'yPrice',
-                        data: chartCloses,
-                        borderColor: 'rgba(41, 98, 255, 1)',
-                        backgroundColor: 'rgba(41, 98, 255, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        pointRadius: 0
+                        data: candlestickData
                     },
                     {
-                        label: 'EMA (50)',
-                        yAxisID: 'yPrice',
-                        data: chartEma50,
-                        borderColor: '#FBBF24',
-                        borderWidth: 1.5,
-                        fill: false,
-                        pointRadius: 0,
-                        spanGaps: true,
-                    },
-                    {
-                        label: 'EMA (200)',
-                        yAxisID: 'yPrice',
-                        data: chartEma200,
-                        borderColor: '#ef4444', // Light purple for EMA 200
-                        borderWidth: 1.5,
-                        fill: false,
-                        pointRadius: 0,
-                        spanGaps: true,
-                    },
-                    {
-                        label: 'RSI (14)',
-                        yAxisID: 'yRsi',
-                        data: chartRsi,
-                        borderColor: '#10b981', // Rose color for RSI
-                        borderWidth: 1.5,
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.4
+                        type: 'bar',
+                        label: 'GainzAlgo',
+                        yAxisID: 'yGainz',
+                        data: gainzAlgoChartData,
+                        borderWidth: 1,
                     }
                 ]
             },
@@ -100,43 +117,46 @@ async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair
                     fontColor: '#EAECEF',
                     fontFamily: 'sans-serif'
                 },
-                legend: { 
-                    position: 'bottom',
-                    labels: { fontColor: '#94A3B8', boxWidth: 15 }
-                },
+                legend: { display: false },
                 scales: {
                     xAxes: [{ 
-                        ticks: { maxTicksLimit: 8, fontColor: '#64748B' },
-                        gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
+                        type: 'time',
+                        time: { unit: 'day' },
+                        ticks: { fontColor: '#64748B' },
+                        gridLines: { color: 'rgba(255, 255, 255, 0.07)' }
                     }],
                     yAxes: [
                         { 
                             id: 'yPrice',
                             position: 'right',
+                            scaleLabel: { display: true, labelString: 'Price', fontColor: '#94A3B8' },
                             ticks: { 
                                 fontColor: '#64748B',
-                                min: minPrice - (priceRange * 0.733),
-                                max: maxPrice + (priceRange * 0.1)
+                                min: minPrice - priceRange * 0.1,
+                                max: maxPrice + priceRange * 0.1
                             },
-                            gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
+                            gridLines: { color: 'rgba(255, 255, 255, 0.07)' }
                         },
                         {
-                            id: 'yRsi',
+                            id: 'yGainz',
                             position: 'left',
-                            ticks: {
-                                min: 0,
-                                max: 250,
-                                callback: (value) => (value <= 100 ? value : null),
-                                fontColor: '#64748B'
-                            },
+                            scaleLabel: { display: true, labelString: 'GainzAlgo', fontColor: '#94A3B8' },
+                            ticks: { fontColor: '#64748B', maxTicksLimit: 5 },
                             gridLines: { drawOnChartArea: false }
                         }
                     ]
                 },
+                plugins: {
+                    // Enable the financial charts plugin
+                    financial: true
+                },
                 annotation: {
                     annotations: [
-                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 70, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4] },
-                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 30, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4] }
+                        // Highlight key levels for GainzAlgo
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: 1.5, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Buy', enabled: true, position: 'right' } },
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: 0.5, borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 1, borderDash: [2, 2] },
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: -0.5, borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1, borderDash: [2, 2] },
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: -1.5, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Sell', enabled: true, position: 'right' } }
                     ]
                 }
             }
@@ -160,70 +180,50 @@ async function getMarketAnalysis(symbol) {
         const baseAsset = normalizedSymbol.replace(/(USDT|USD|PHP)$/, '');
         const usdtSymbol = `${baseAsset}USDT`;
 
-        // 1. Fetch Klines - Increased limit for EMA 200
+        // 1. Fetch Klines (full OHLCV data) - limit 300 for calculations
         const klineUrl = `https://api.pro.coins.ph/openapi/v1/klines?symbol=${normalizedSymbol}&interval=1h&limit=300`;
         const klineResp = await axios.get(klineUrl);
-        
+        const klines = klineResp.data;
+
         // 2. Fetch Tickers
         const tickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${normalizedSymbol}`;
         const tickerResp = await axios.get(tickerUrl);
         const usdtTickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${usdtSymbol}`;
         const usdtTickerResp = await axios.get(usdtTickerUrl);
 
-        const closes = klineResp.data.map(d => parseFloat(d[4]));
         const currentPricePHP = parseFloat(tickerResp.data.lastPrice);
         const change24h = tickerResp.data.priceChangePercent;
+        const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice);
 
-        // 3. Technical Indicators
-        const rsiValues = RSI.calculate({ values: closes, period: 14 });
-        const ema50Values = EMA.calculate({ values: closes, period: 50 });
-        const ema200Values = EMA.calculate({ values: closes, period: 200 });
+        // 3. Calculate GainzAlgo
+        const gainzAlgoValues = calculateGainzAlgo(klines);
+        const currentGainzAlgo = gainzAlgoValues[gainzAlgoValues.length - 1];
 
-        const currentRSI = rsiValues[rsiValues.length - 1];
-        const currentEMA50 = ema50Values[ema50Values.length - 1];
-        const currentEMA200 = ema200Values[ema200Values.length - 1];
-        const prevEMA50 = ema50Values[ema50Values.length - 2];
-
-        // 4. USDT Price
-        const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice).toFixed(2);
-
-        // 5. NEW 5-TIER STRATEGY LOGIC
+        // 4. NEW GainzAlgo STRATEGY LOGIC
         let sign = "⚪ [HOLD] ⚪";
-        let recommendation = "No strong direction, wait for confirmation.";
+        let recommendation = "Market is consolidating, wait for a clear signal.";
         let alert = false;
         
-        const isBullTrend = currentEMA50 > currentEMA200;
-        const isBearTrend = currentEMA50 < currentEMA200;
-        const isEma50Rising = currentEMA50 >= prevEMA50;
-
-        if (currentRSI < 30 && currentPricePHP >= currentEMA50 && isBullTrend) {
+        if (currentGainzAlgo > 1.5) {
             sign = "🟢🟢 [STRONG BUY] 🟢🟢";
-            recommendation = "Oversold in a confirmed uptrend. Prime reversal opportunity.";
+            recommendation = "Strong bullish momentum detected with high volume.";
             alert = true;
-        } else if (currentRSI > 70 && currentPricePHP < currentEMA50 && isBearTrend) {
+        } else if (currentGainzAlgo < -1.5) {
             sign = "🔴🔴 [STRONG SELL] 🔴🔴";
-            recommendation = "Overbought in a confirmed downtrend. Prime exit opportunity.";
+            recommendation = "Strong bearish momentum detected with high volume.";
             alert = true;
-        } else if (currentRSI >= 30 && currentRSI < 45 && currentPricePHP > (currentEMA50 * 0.99) && (isEma50Rising || isBullTrend)) {
+        } else if (currentGainzAlgo > 0.5) {
             sign = "🟢 [BUY ZONE] 🟢";
-            recommendation = "Early entry zone as upward momentum may be forming.";
+            recommendation = "Bullish pressure is building, potential entry point.";
             alert = true;
-        } else if (currentRSI > 55 && currentRSI <= 70 && currentPricePHP < (currentEMA50 * 1.01) && !isEma50Rising) {
+        } else if (currentGainzAlgo < -0.5) {
             sign = "🔴 [SELL ZONE] 🔴";
-            recommendation = "Weakness showing; a possible down move may be forming.";
+            recommendation = "Bearish pressure is building, consider taking profit or shorting.";
             alert = true;
         }
-        
-        // <<< ADD THIS BLOCK TO CALCULATE THE TREND LABEL
-        let trend = "⚪ SIDEWAYS";
-        if (isBullTrend) trend = "📈 UPTREND";
-        else if (isBearTrend) trend = "📉 DOWNTREND";
-        // <<< END OF ADDED BLOCK
 
-        // 6. Request chart image creation
-        const chartBuffer = await getChartBuffer(closes, ema50Values, ema200Values, rsiValues, normalizedSymbol);
-
-        const formatNumber = (num) => Number(num).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        // 5. Request chart image creation
+        const chartBuffer = await getChartBuffer(klines, gainzAlgoValues, normalizedSymbol);
 
         return {
             symbol: baseAsset,
@@ -231,14 +231,11 @@ async function getMarketAnalysis(symbol) {
             sign,
             recommendation,
             chartBuffer,
-            rsi: currentRSI.toFixed(2),
-            ema50: formatNumber(currentEMA50),
-            ema200: formatNumber(currentEMA200),
-            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+            gainzAlgo: currentGainzAlgo.toFixed(3),
+            pricePHP: Number(currentPricePHP).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             change: change24h,
             alert,
-            trend, // <<< ADD THIS PROPERTY TO THE RETURNED OBJECT
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);

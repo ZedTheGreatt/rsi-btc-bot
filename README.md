@@ -1,14 +1,17 @@
+Of course. Here is the final, updated `README.md` file for the GainzAlgo version of the project.
+
+---
+
 # 🤖 CoinsBot (Coins.ph Edition)
 
-CoinsBot is a Telegram bot for monitoring cryptocurrency pairs from the **Coins.ph Pro API** using technical indicators like **RSI (14)**, **EMA (50)**, and **EMA (200)**. It can send hourly market updates, generate on-demand chart-based reports, and provide signal-style summaries directly in Telegram.
+CoinsBot is a Telegram bot for monitoring cryptocurrency pairs from the **Coins.ph Pro API** using a custom **GainzAlgo** indicator. It can send hourly market updates, generate on-demand candlestick charts with indicator overlays, and provide signal-style summaries directly in Telegram.
 
 ## ✨ Features
 
 - **Hourly market monitoring** for all configured coins
-- **Signal alerts** for oversold / overbought conditions
-- **Trend detection** using **EMA 50** and **EMA 200**
+- **Signal alerts** based on the custom `GainzAlgo` momentum indicator
 - **Dual price display** in **PHP** and **USDT**
-- **Chart image generation** for alerts and `/price` lookups
+- **Candlestick chart generation** with the `GainzAlgo` indicator for alerts and `/price` lookups
 - **Telegram bot controls** for starting, stopping, and refreshing polling
 - **Health-check web server** for uptime monitoring / deployment platforms
 - **Resilient polling restart logic** for common Telegram connection issues
@@ -17,7 +20,7 @@ CoinsBot is a Telegram bot for monitoring cryptocurrency pairs from the **Coins.
 
 - **Node.js**
 - **node-telegram-bot-api**
-- **technicalindicators**
+- **technicalindicators** (for SMA calculation)
 - **axios**
 - **node-cron**
 - **express**
@@ -28,7 +31,7 @@ CoinsBot is a Telegram bot for monitoring cryptocurrency pairs from the **Coins.
 ```text
 .
 ├── index.js         # Telegram bot, scheduler, polling control, commands
-├── indicators.js    # Market analysis, RSI/EMA logic, chart generation
+├── indicators.js    # Market analysis, GainzAlgo logic, chart generation
 ├── README.md
 └── .env             # Environment variables (create this yourself)
 ```
@@ -99,7 +102,7 @@ When the bot starts, it will:
 | `/restart` | Restart Telegram polling manually |
 | `/now` | Trigger an immediate market analysis for all configured coins |
 | `/coins` | Show the list of tracked coins |
-| `/price [coin]` | Generate a report + chart for a specific coin |
+| `/price [coin]` | Generate a report + candlestick chart for a specific coin |
 | `/help` or `/commands` | Show the command list |
 
 ### Example
@@ -108,7 +111,7 @@ When the bot starts, it will:
 /price SOL
 ```
 
-This will normalize to `SOLPHP` and generate a chart-based market report if data is available.
+This will normalize to `SOLPHP` and generate a candlestick chart-based market report if data is available.
 
 ## 📊 Alert / Report Contents
 
@@ -117,14 +120,11 @@ Each alert or on-demand report may include:
 - Signal banner / status icon
 - Coin label
 - Recommendation summary
-- Trend
-- RSI (14)
-- EMA (50)
-- EMA (200)
+- **GainzAlgo** indicator value
 - Current PHP price
 - Current USDT price
 - 24h percentage change
-- Chart image (when generation succeeds)
+- Candlestick chart image (when generation succeeds)
 
 If chart generation fails, the bot falls back to sending a text-only message.
 

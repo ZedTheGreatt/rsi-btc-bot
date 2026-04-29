@@ -191,16 +191,16 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
           `📝 *REC:* _${data.recommendation}_`,
           ``,
-          `📊 *INDICATORS*`,
-          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
-          `- RSI (14): ${data.rsi}`,
-          `- EMA (50): ₱${data.ema50}`,
-          `- EMA (200): ₱${data.ema200}`,
+          `📊 *INDICATOR*`,
+          `- GainzAlgo: ${data.gainzAlgo}`, // <<< CHANGED
           ``,
           `💵 *PRICE*`,
           `- PHP: ₱${data.pricePHP}`,
           `- USDT: $${data.priceUSDT}`,
-          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
+          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`,
+          ``,
+          `_PS: Data may be inaccurate._`,
+          `- CoinsBot 2026`
         ].join('\n');
 
         await safeSendChartAndText(targetChatId, data.chartBuffer, message, {
@@ -269,11 +269,8 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
           `📝 *REC:* _${data.recommendation}_`,
           ``,
-          `📊 *INDICATORS*`,
-          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
-          `- RSI (14): ${data.rsi}`,
-          `- EMA (50): ₱${data.ema50}`,
-          `- EMA (200): ₱${data.ema200}`,
+          `📊 *INDICATOR*`,
+          `- GainzAlgo: ${data.gainzAlgo}`, // <<< CHANGED
           ``,
           `💵 *PRICE*`,
           `- PHP: ₱${data.pricePHP}`,
