@@ -29,15 +29,52 @@ async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair
         const alignedEma200 = align(ema200Values, closes.length);
         const alignedRsi = align(rsiValues, closes.length);
 
-        const visiblePoints = 72; // Show 4 days of hourly data
+        const visiblePoints = 72; // Show 3 days of hourly data
         const chartCloses = closes.slice(-visiblePoints);
         const chartEma50 = alignedEma50.slice(-visiblePoints);
         const chartEma200 = alignedEma200.slice(-visiblePoints);
         const chartRsi = alignedRsi.slice(-visiblePoints);
         
-        const labels = Array.from({ length: chartCloses.length }, (_, i) => 
-            i === chartCloses.length - 0 ? 'NOW' : `-${chartCloses.length - 0 - i}h`
-        );
+        // --- MODIFIED: Generate real date/time labels for the PH timezone ---
+        const now = new Date();
+        const labels = Array.from({ length: chartCloses.length }, (_, i) => {
+            // The timestamp for the current data point in the loop
+            const pointDate = new Date(now.getTime() - (chartCloses.length - 1 - i) * 3600 * 1000);
+            // The timestamp for the previous data point, to check for day change
+            const prevPointDate = new Date(pointDate.getTime() - 3600 * 1000);
+
+            // Intl.DateTimeFormat is the modern way to handle timezones and locales
+            const timeFormatter = new Intl.DateTimeFormat('en-SG', { // en-SG provides a clean 24h format like 09:00
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Manila'
+            });
+            const dateFormatter = new Intl.DateTimeFormat('en-US', {
+                month: 'numeric',
+                day: 'numeric',
+                timeZone: 'Asia/Manila'
+            });
+
+            // For the very last point, display 'NOW' for clarity
+            if (i === chartCloses.length - 1) {
+                return 'NOW';
+            }
+            
+            const currentDay = dateFormatter.format(pointDate);
+            const prevDay = dateFormatter.format(prevPointDate);
+
+            // If it's the first label in the chart, or if the day has changed
+            // since the previous label, display the date as well.
+            // Using a multi-line label array `[time, date]` for better readability.
+            if (i === 0 || currentDay !== prevDay) {
+                return [timeFormatter.format(pointDate), currentDay];
+            }
+
+            // Otherwise, just show the time
+            return timeFormatter.format(pointDate);
+        });
+        // --- END OF MODIFICATION ---
 
         // Safely extract min/max to prevent QuickChart "Infinity" 400 errors
         const validPrices = [...chartCloses, ...chartEma50, ...chartEma200].filter(v => typeof v === 'number' && !isNaN(v));
