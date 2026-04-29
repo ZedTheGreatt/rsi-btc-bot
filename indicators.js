@@ -64,6 +64,15 @@ function calculateGainzAlgo(klines) {
  * @returns {Promise<Buffer|null>} A buffer containing the chart image, or null on error.
  */
 async function getChartBuffer(klines, gainzAlgoValues, pair) {
+    // =========================================================================
+    // <<< FIX: ADDED GUARD CLAUSE >>>
+    // This prevents errors if the API returns insufficient data for a chart.
+    if (!klines || klines.length === 0 || !gainzAlgoValues || gainzAlgoValues.length === 0) {
+        console.error(`Chart generation skipped for ${pair}: Not enough data provided.`);
+        return null;
+    }
+    // =========================================================================
+
     try {
         const visiblePoints = 72; // Show last 72 hours (3 days)
         const recentKlines = klines.slice(-visiblePoints);
@@ -77,11 +86,11 @@ async function getChartBuffer(klines, gainzAlgoValues, pair) {
             c: parseFloat(k[4]),
         }));
 
-        const gainzAlgoChartData = recentGainzAlgo.map((value, index) => ({
-            x: candlestickData[index].x,
-            y: value,
-            backgroundColor: value >= 0 ? 'rgba(16, 185, 129, 0.7)' : 'rgba(239, 68, 68, 0.7)',
-            borderColor: value >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)',
+        const gainzAlgoChartData = recentKlines.map((k, index) => ({
+            x: parseInt(k[0]), // Use the same timestamp for alignment
+            y: recentGainzAlgo[index] || 0, // Default to 0 if misaligned
+            backgroundColor: (recentGainzAlgo[index] || 0) >= 0 ? 'rgba(16, 185, 129, 0.7)' : 'rgba(239, 68, 68, 0.7)',
+            borderColor: (recentGainzAlgo[index] || 0) >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)',
         }));
         
         // Safely extract min/max to prevent QuickChart "Infinity" 400 errors
@@ -121,7 +130,7 @@ async function getChartBuffer(klines, gainzAlgoValues, pair) {
                 scales: {
                     xAxes: [{ 
                         type: 'time',
-                        time: { unit: 'day' },
+                        time: { unit: 'day', tooltipFormat: 'll HH:mm' },
                         ticks: { fontColor: '#64748B' },
                         gridLines: { color: 'rgba(255, 255, 255, 0.07)' }
                     }],
@@ -147,29 +156,36 @@ async function getChartBuffer(klines, gainzAlgoValues, pair) {
                     ]
                 },
                 plugins: {
-                    // Enable the financial charts plugin
+                    // This specific key enables the financial charts plugin on QuickChart.io
                     financial: true
                 },
                 annotation: {
                     annotations: [
-                        // Highlight key levels for GainzAlgo
-                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: 1.5, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Buy', enabled: true, position: 'right' } },
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: 1.5, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Buy', enabled: true, position: 'right', fontColor: '#EAECEF' } },
                         { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: 0.5, borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 1, borderDash: [2, 2] },
                         { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: -0.5, borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1, borderDash: [2, 2] },
-                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: -1.5, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Sell', enabled: true, position: 'right' } }
+                        { type: 'line', mode: 'horizontal', scaleID: 'yGainz', value: -1.5, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4], label: { content: 'Strong Sell', enabled: true, position: 'right', fontColor: '#EAECEF' } }
                     ]
                 }
             }
         };
 
-        const response = await axios.post('https://quickchart.io/chart', {
-            chart: chartConfig, width: 600, height: 400, backgroundColor: '#131722', format: 'png'
-        }, { responseType: 'arraybuffer' });
+        const postData = {
+            chart: chartConfig,
+            width: 600,
+            height: 400,
+            backgroundColor: '#131722',
+            format: 'png'
+        };
+
+        const response = await axios.post('https://quickchart.io/chart', postData, { 
+            responseType: 'arraybuffer' 
+        });
 
         return Buffer.from(response.data);
     } catch (error) {
         const errorMessage = error.response?.data?.toString() || error.message;
-        console.error("Failed to generate chart image:", errorMessage);
+        console.error(`Failed to generate chart image for ${pair}:`, errorMessage);
         return null;
     }
 }
@@ -184,6 +200,12 @@ async function getMarketAnalysis(symbol) {
         const klineUrl = `https://api.pro.coins.ph/openapi/v1/klines?symbol=${normalizedSymbol}&interval=1h&limit=300`;
         const klineResp = await axios.get(klineUrl);
         const klines = klineResp.data;
+
+        // Ensure we have data before proceeding
+        if (!klines || klines.length < 20) {
+            console.warn(`Insufficient kline data for ${normalizedSymbol} to generate analysis.`);
+            return null;
+        }
 
         // 2. Fetch Tickers
         const tickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${normalizedSymbol}`;
@@ -238,7 +260,12 @@ async function getMarketAnalysis(symbol) {
             alert,
         };
     } catch (error) {
-        console.error(`Indicator Error (${symbol}):`, error.message);
+        // Handle cases where the ticker might not exist (e.g., SOLUSDT vs SOLPHP)
+        if (error.response && error.response.status === 400) {
+            console.warn(`Could not fetch market data for ${symbol}. It may not be a valid pair.`);
+        } else {
+            console.error(`Indicator Error (${symbol}):`, error.message);
+        }
         return null;
     }
 }
