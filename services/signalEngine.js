@@ -7,7 +7,13 @@ const symbols = ["BTCPHP", "ETHPHP", "XRPPHP", "SOLPHP"];
 
 async function scanMarket(force = false) {
   for (const symbol of symbols) {
+  try {
     const candles = await getKlines(symbol);
+    // analysis...
+  } catch (err) {
+    console.error(`${symbol}:`, err.message);
+  }
+}
 
     if (!candles || candles.length < 20) continue;
 

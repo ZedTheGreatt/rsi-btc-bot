@@ -1,21 +1,29 @@
 const axios = require("axios");
 
-// Coins.ph style klines (replace endpoint if needed)
+const MAP = {
+  BTCPHP: "btc-php",
+  ETHPHP: "eth-php",
+  XRPPHP: "xrp-php",
+  SOLPHP: "sol-php",
+};
+
 async function getKlines(symbol = "BTCPHP") {
-  const url = `https://api.coingecko.com/api/v3/coins/${symbol
-    .replace("PHP", "")
-    .toLowerCase()}/market_chart?vs_currency=php&days=1`;
+  const pair = MAP[symbol];
+  if (!pair) throw new Error(`Unsupported symbol: ${symbol}`);
 
-  const res = await axios.get(url);
+  const url = `https://api.pro.coins.ph/openapi/quote/v1/klines?symbol=${pair}&interval=1h&limit=100`;
 
-  const prices = res.data.prices;
+  const { data } = await axios.get(url, { timeout: 10000 });
 
-  return prices.map((p) => ({
-    time: p[0],
-    open: p[1],
-    high: p[1],
-    low: p[1],
-    close: p[1],
+  if (!data || !data.data) throw new Error("No candle data");
+
+  return data.data.map(c => ({
+    time: Number(c[0]),
+    open: Number(c[1]),
+    high: Number(c[2]),
+    low: Number(c[3]),
+    close: Number(c[4]),
+    volume: Number(c[5]),
   }));
 }
 
