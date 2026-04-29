@@ -29,7 +29,7 @@ async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair
         const alignedEma200 = align(ema200Values, closes.length);
         const alignedRsi = align(rsiValues, closes.length);
 
-        const visiblePoints = 72; // Show 3 days of hourly data
+        const visiblePoints = 73; // Show 3 days of hourly data
         const chartCloses = closes.slice(-visiblePoints);
         const chartEma50 = alignedEma50.slice(-visiblePoints);
         const chartEma200 = alignedEma200.slice(-visiblePoints);
@@ -132,7 +132,7 @@ async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair
             options: {
                 title: { 
                     display: true, 
-                    text: `Coins.ph ${pair} Chart (Last ${visiblePoints} Hrs)`, 
+                    text: `Coins.ph ${pair} Chart (Last ${visiblePoints-1} Hrs)`, 
                     fontSize: 18,
                     fontColor: '#EAECEF',
                     fontFamily: 'sans-serif'
