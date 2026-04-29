@@ -189,17 +189,15 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
         const message = [
           `${data.sign}`,
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📝 *REC:* _${data.recommendation}_`,
+          `📝 *DETAILS:* _${data.recommendation}_`, // Changed from REC to DETAILS
           ``,
-          `📊 *INDICATOR*`,
-          `- GainzAlgo: ${data.gainzAlgo}`, // <<< CHANGED
-          ``,
-          `💵 *PRICE*`,
+          `📊 *MARKET DATA*`, // Changed from INDICATOR
+          `- GainzAlgo Val: ${data.gainzAlgo}`,
           `- PHP: ₱${data.pricePHP}`,
           `- USDT: $${data.priceUSDT}`,
           `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`,
           ``,
-          `_PS: Data may be inaccurate._`,
+          `_PS: This is not financial advice._`,
           `- CoinsBot 2026`
         ].join('\n');
 
@@ -220,7 +218,7 @@ bot.onText(/\/start$/, async msg => {
   isBotActive = true;
   await safeSend(
     msg.chat.id,
-    '🤖 *CoinsBot Activated*\nMonitoring every hour for strategic entry/exit zones.',
+    '🤖 *CoinsBot Activated*\nMonitoring every hour for new GainzAlgo signals.',
     { parse_mode: 'Markdown' }
   );
 });
@@ -260,19 +258,17 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     bot.deleteMessage(msg.chat.id, noticeMsg.message_id).catch(() => {});
 
     if (!data) {
-      await safeSend(msg.chat.id, '❌ Coin not found on Pro Coins.PH Data base.');
+      await safeSend(msg.chat.id, '❌ Coin not found or insufficient data.');
       return;
     }
 
     const reportMessage = [
         `${data.sign}`,
           `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📝 *REC:* _${data.recommendation}_`,
+          `📝 *DETAILS:* _${data.recommendation}_`,
           ``,
-          `📊 *INDICATOR*`,
-          `- GainzAlgo: ${data.gainzAlgo}`, // <<< CHANGED
-          ``,
-          `💵 *PRICE*`,
+          `📊 *MARKET DATA*`,
+          `- GainzAlgo Val: ${data.gainzAlgo}`,
           `- PHP: ₱${data.pricePHP}`,
           `- USDT: $${data.priceUSDT}`,
           `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
@@ -291,12 +287,12 @@ bot.onText(/\/help|\/commands/, async msg => {
     [
       '🤖 *CoinsBot Commands List:*',
       '/help or /commands - Show commands list',
-      '/start - Start hourly alerts',
+      '/start - Start hourly alerts for new signals',
       '/end - Stop alerts',
       '/restart - Restart bot polling',
-      '/now - Show market data now w/ charts',
+      '/now - Show current market analysis & chart',
       '/coins - List tracked coins',
-      '/price [coin] - Price check and visual Chart.'
+      '/price [coin] - Price check with GainzAlgo signal chart.'
     ].join('\n'),
     { parse_mode: 'Markdown' }
   );
@@ -306,7 +302,7 @@ bot.onText(/\/help|\/commands/, async msg => {
 // SCHEDULER
 // =========================
 cron.schedule('0 * * * *', async () => {
-  console.log('Running hourly check...');
+  console.log('Running hourly check for new signals...');
   await processUpdates(false);
 });
 
