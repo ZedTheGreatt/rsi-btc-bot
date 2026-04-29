@@ -143,7 +143,7 @@ async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair
                 },
                 scales: {
                     xAxes: [{ 
-                        ticks: { maxTicksLimit: 8, fontColor: '#64748B' },
+                        ticks: { maxTicksLimit: 6, fontColor: '#64748B' },
                         gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
                     }],
                     yAxes: [
