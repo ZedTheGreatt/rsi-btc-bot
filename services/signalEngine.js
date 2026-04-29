@@ -7,21 +7,19 @@ const symbols = ["BTCPHP", "ETHPHP", "XRPPHP", "SOLPHP"];
 
 async function scanMarket(force = false) {
   for (const symbol of symbols) {
-  try {
-    const candles = await getKlines(symbol);
-    // analysis...
-  } catch (err) {
-    console.error(`${symbol}:`, err.message);
-  }
-}
+    try {
+      const candles = await getKlines(symbol);
 
-    if (!candles || candles.length < 20) continue;
+      if (!candles || candles.length < 20) {
+        console.log(`${symbol}: not enough candles`);
+        continue; // valid here because we're inside for-loop
+      }
 
-    const result = analyzeGainzAlgo(candles);
+      const result = analyzeGainzAlgo(candles);
 
-    const chart = await generateChart(candles, result.signal);
+      const chart = await generateChart(candles, result.signal);
 
-    const message = `
+      const message = `
 ${formatSignal(result.signal)}
 
 ${symbol}
@@ -31,11 +29,15 @@ Trend: ${result.trend}
 Momentum: ${result.momentum}
 Confidence: ${result.confidence}%
 
-GainzAlgo v2 Signal
+© CoinsBot GainzAlgo v2
 `;
 
-    if (force || result.signal !== "HOLD") {
-      sendSignal(message, chart);
+      if (force || result.signal !== "HOLD") {
+        await sendSignal(message, chart);
+      }
+
+    } catch (error) {
+      console.error(`${symbol}: ${error.message}`);
     }
   }
 }
