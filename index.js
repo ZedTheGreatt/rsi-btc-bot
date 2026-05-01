@@ -207,8 +207,9 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
           `- USDT: $${data.priceUSDT}`,
           `🔁 24h Change: ${formatChange(data.change)}%`,
           ``,
-          `📊 *CHART*`,
-          `[View Chart](${data.chartUrl})`
+          `━━━━━━━━━━━━`,
+          `© CoinsBot 2026 • Powered by Coins.ph API`,
+          `⚠️ Market data may be delayed or vary slightly.`
         ].join('\n');
 
         await safeSendChartAndText(targetChatId, data.chartBuffer, message, {
@@ -288,8 +289,9 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
           `- USDT: $${data.priceUSDT}`,
           `🔁 24h Change: ${formatChange(data.change)}%`,
           ``,
-          `📊 *CHART*`,
-          `[View Chart](${data.chartUrl})`
+          `━━━━━━━━━━━━`,
+          `© CoinsBot 2026 • Powered by Coins.ph API`,
+          `⚠️ Market data may be delayed or vary slightly.`
         ].join('\n');
         
     await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
