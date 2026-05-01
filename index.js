@@ -192,7 +192,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
 
       if (data.alert || forceNotify) {
         const message = [
-          `${data.sign} *${coinLogo[data.symbol] || data.symbol}*`,
+          `*${data.sign} ${coinLogo[data.symbol] || data.symbol}*`,
           `🤖 _${data.recommendation}_`,
           `━━━━━━━━━━━━━━━━━━━━━━`,
           `📊 *MARKET STRUCTURE*`,
@@ -274,7 +274,7 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     }
 
     const reportMessage = [
-        `${data.sign} *${coinLogo[data.symbol] || data.symbol}*`,
+        `*${data.sign} ${coinLogo[data.symbol] || data.symbol}*`,
         `🤖 _${data.recommendation}_`,
         `━━━━━━━━━━━━━━━━━━━━━━`,
         `💵 *PRICE*`,
