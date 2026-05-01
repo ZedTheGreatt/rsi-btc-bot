@@ -241,7 +241,7 @@ async function getMarketAnalysis(symbol) {
         const currentPriceUSDT = parseFloat(usdtTickerResp.data.lastPrice).toFixed(2);
 
         // 5. NEW 5-TIER STRATEGY LOGIC
-        let sign = "⚪ [HOLD] ⚪";
+        let sign = "⚪ HOLD ⚪";
         let recommendation = "No strong direction, wait for confirmation.";
         let alert = false;
         
@@ -250,19 +250,19 @@ async function getMarketAnalysis(symbol) {
         const isEma50Rising = currentEMA50 >= prevEMA50;
 
         if (currentRSI < 30 && currentPricePHP >= currentEMA50 && isBullTrend) {
-            sign = "🟢🟢 [STRONG BUY] 🟢🟢";
+            sign = "🟢🟢 STRONG BUY 🟢🟢";
             recommendation = "Oversold in a confirmed uptrend. Prime reversal opportunity.";
             alert = true;
         } else if (currentRSI > 70 && currentPricePHP < currentEMA50 && isBearTrend) {
-            sign = "🔴🔴 [STRONG SELL] 🔴🔴";
+            sign = "🔴🔴 STRONG SELL 🔴🔴";
             recommendation = "Overbought in a confirmed downtrend. Prime exit opportunity.";
             alert = true;
         } else if (currentRSI >= 30 && currentRSI < 45 && currentPricePHP > (currentEMA50 * 0.99) && (isEma50Rising || isBullTrend)) {
-            sign = "🟢 [BUY ZONE] 🟢";
+            sign = "🟢 BUY ZONE 🟢";
             recommendation = "Early entry zone as upward momentum may be forming.";
             alert = true;
         } else if (currentRSI > 55 && currentRSI <= 70 && currentPricePHP < (currentEMA50 * 1.01) && !isEma50Rising) {
-            sign = "🔴 [SELL ZONE] 🔴";
+            sign = "🔴 SELL ZONE 🔴";
             recommendation = "Weakness showing; a possible down move may be forming.";
             alert = true;
         }
