@@ -174,6 +174,8 @@ async function restartPolling(delay = reconnectDelay) {
   }, delay);
 }
 
+const changePercent = Number(data.change || 0) * 100;
+const formattedChange = `${changePercent > 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
 // =========================
 // CORE UPDATE LOGIC
 // =========================
@@ -200,7 +202,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
           `💵 *PRICE*`,
           `- PHP: ₱${data.pricePHP}`,
           `- USDT: $${data.priceUSDT}`,
-          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
+          `🔁 24h Change: ${formattedChange}%`
         ].join('\n');
 
         await safeSendChartAndText(targetChatId, data.chartBuffer, message, {
@@ -278,7 +280,7 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
           `💵 *PRICE*`,
           `- PHP: ₱${data.pricePHP}`,
           `- USDT: $${data.priceUSDT}`,
-          `🔁 24h Change: ${(Number(data.change || 0) * 100).toFixed(2)}%`
+          `🔁 24h Change: ${formattedChange}%`
         ].join('\n');
         
     await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
