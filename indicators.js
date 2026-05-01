@@ -1,5 +1,6 @@
 const axios = require('axios');
-const { RSI, EMA } = require('technicalindicators');
+const { RSI, EMA, ATR } = require('technicalindicators');
+const { getArrowAnnotations } = require('./charts/arrows');
 
 function normalizeSymbol(rawSymbol) {
     const symbol = String(rawSymbol || '').toUpperCase().trim();
@@ -17,7 +18,7 @@ function normalizeSymbol(rawSymbol) {
  * @param {string} pair - The full trading pair symbol (e.g., 'BTCUSDT').
  * @returns {Promise<Buffer|null>} A buffer containing the chart image, or null on error.
  */
-async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pair) {
+async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pair, signals = []) {
     try {
         const align = (values, length) =>
             values.length >= length
@@ -29,11 +30,20 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
         const alignedEma200 = align(ema200Values, n);
         const alignedRsi = align(rsiValues, n);
 
-        const visiblePoints = 73; // Show 3 days of hourly data
+        const hours = 24;
+        const visiblePoints = hours; // Show 3 days of hourly data
         const chartBars = ohlcBars.slice(-visiblePoints);
         const chartEma50 = alignedEma50.slice(-visiblePoints);
         const chartEma200 = alignedEma200.slice(-visiblePoints);
         const chartRsi = alignedRsi.slice(-visiblePoints);
+        const visibleStartIndex = Math.max(0, ohlcBars.length - visiblePoints);
+        const chartSignals = (Array.isArray(signals) ? signals : [])
+            .filter((signal) => Number.isInteger(signal.index) && signal.index >= visibleStartIndex)
+            .map((signal) => ({
+                ...signal,
+                index: signal.index - visibleStartIndex,
+            }));
+        const latestSignal = chartSignals[chartSignals.length - 1] || null;
 
         const lineSeries = (ys) =>
             chartBars.map((b, i) => {
@@ -54,9 +64,19 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                 if (typeof v === 'number' && !Number.isNaN(v)) validPrices.push(v);
             });
         });
-        const minPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0;
-        const maxPrice = validPrices.length > 0 ? Math.max(...validPrices) : 100;
-        const priceRange = maxPrice - minPrice === 0 ? maxPrice * 0.01 || 1 : maxPrice - minPrice;
+        if (latestSignal) {
+            [latestSignal.entry, latestSignal.tp1, latestSignal.tp2, latestSignal.sl].forEach((v) => {
+                if (typeof v === 'number' && !Number.isNaN(v) && v > 0) validPrices.push(v);
+            });
+        }
+        const rawMinPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0;
+        const rawMaxPrice = validPrices.length > 0 ? Math.max(...validPrices) : 100;
+        const priceRange = rawMaxPrice - rawMinPrice === 0 ? rawMaxPrice * 0.01 || 1 : rawMaxPrice - rawMinPrice;
+        const overlayPadding = chartSignals.length > 0 ? priceRange * 0.28 : 0;
+        const minPrice = rawMinPrice - overlayPadding;
+        const maxPrice = rawMaxPrice + overlayPadding;
+        const axisRange = maxPrice - minPrice === 0 ? priceRange : maxPrice - minPrice;
+        const arrowAnnotations = getArrowAnnotations(chartSignals, chartBars, priceRange);
 
         const chartConfig = {
             data: {
@@ -73,13 +93,13 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                             c: b.c,
                         })),
                         borderColor: {
-                            up: '#26a69a',
-                            down: '#ef5350',
+                            up: '#00f58a',
+                            down: '#ff315a',
                             unchanged: '#94a3b8',
                         },
                         backgroundColor: {
-                            up: 'rgba(38, 166, 154, 0.55)',
-                            down: 'rgba(239, 83, 80, 0.55)',
+                            up: 'rgba(0, 245, 138, 0.68)',
+                            down: 'rgba(255, 49, 90, 0.68)',
                             unchanged: 'rgba(148, 163, 184, 0.45)',
                         },
                     },
@@ -88,8 +108,8 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                         label: 'EMA (50)',
                         yAxisID: 'yPrice',
                         data: lineSeries(chartEma50),
-                        borderColor: '#FFB000',
-                        borderWidth: 1.5,
+                        borderColor: '#fbbf24',
+                        borderWidth: 1.25,
                         pointRadius: 0,
                         spanGaps: true,
                     },
@@ -98,8 +118,8 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                         label: 'EMA (200)',
                         yAxisID: 'yPrice',
                         data: lineSeries(chartEma200),
-                        borderColor: '#1E88E5',
-                        borderWidth: 1.5,
+                        borderColor: '#38bdf8',
+                        borderWidth: 1.25,
                         pointRadius: 0,
                         spanGaps: true,
                     },
@@ -108,8 +128,8 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                         label: 'RSI (14)',
                         yAxisID: 'yRsi',
                         data: lineSeries(chartRsi),
-                        borderColor: '#B026FF',
-                        borderWidth: 1.5,
+                        borderColor: '#a78bfa',
+                        borderWidth: 1.25,
                         pointRadius: 0,
                         spanGaps: true,
                         tension: 0.4,
@@ -124,34 +144,34 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                             unit: 'hour',
                             displayFormats: { hour: 'MMM d HH:mm' },
                         },
-                        ticks: { color: '#64748B', maxTicksLimit: 12 },
-                        grid: { color: 'rgba(255, 255, 255, 0.07)' },
+                        ticks: { color: '#8da2bd', maxTicksLimit: 12 },
+                        grid: { color: 'rgba(148, 163, 184, 0.08)' },
                     },
                     yPrice: {
                         position: 'right',
-                        min: minPrice - priceRange * 0.733,
-                        max: maxPrice + priceRange * 0.1,
-                        ticks: { color: '#64748B' },
-                        grid: { color: 'rgba(255, 255, 255, 0.07)' },
+                        min: minPrice - axisRange * 0.06,
+                        max: maxPrice + axisRange * 0.06,
+                        ticks: { color: '#8da2bd' },
+                        grid: { color: 'rgba(148, 163, 184, 0.08)' },
                     },
                     yRsi: {
                         position: 'left',
                         min: 0,
                         max: 200,
-                        ticks: { color: '#64748B' },
+                        ticks: { color: '#8da2bd' },
                         grid: { drawOnChartArea: false },
                     },
                 },
                 plugins: {
                     title: {
                         display: true,
-                        text: `Coins.ph ${pair} Chart (Last ${visiblePoints - 1} Hrs)`,
-                        color: '#EAECEF',
-                        font: { size: 18, family: 'sans-serif' },
+                        text: `Coins.ph ${pair} Chart (Last ${hours} Hrs)`,
+                        color: '#f8fafc',
+                        font: { size: 17, family: 'Arial', weight: 'bold' },
                     },
                     legend: {
                         position: 'bottom',
-                        labels: { color: '#94A3B8', boxWidth: 15 },
+                        labels: { color: '#a8b3c7', boxWidth: 15 },
                     },
                     annotation: {
                         annotations: {
@@ -173,6 +193,7 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                                 borderWidth: 1,
                                 borderDash: [4, 4],
                             },
+                            ...arrowAnnotations,
                         },
                     },
                 },
@@ -186,7 +207,7 @@ async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pa
                 version: '4',
                 width: 600,
                 height: 400,
-                backgroundColor: '#131722',
+                backgroundColor: '#07111f',
                 format: 'png',
             },
             { responseType: 'arraybuffer' },
@@ -222,8 +243,12 @@ async function getMarketAnalysis(symbol) {
             h: parseFloat(d[2]),
             l: parseFloat(d[3]),
             c: parseFloat(d[4]),
+            v: parseFloat(d[5] || 0),
         }));
         const closes = ohlcBars.map((b) => b.c);
+        const highs = ohlcBars.map((b) => b.h);
+        const lows = ohlcBars.map((b) => b.l);
+        const volumes = ohlcBars.map((b) => b.v);
         const currentPricePHP = parseFloat(tickerResp.data.lastPrice);
         const change24h = tickerResp.data.priceChangePercent;
 
@@ -231,6 +256,8 @@ async function getMarketAnalysis(symbol) {
         const rsiValues = RSI.calculate({ values: closes, period: 14 });
         const ema50Values = EMA.calculate({ values: closes, period: 50 });
         const ema200Values = EMA.calculate({ values: closes, period: 200 });
+        const atrValues = ATR.calculate({ high: highs, low: lows, close: closes, period: 14 });
+        const volumeEmaValues = EMA.calculate({ values: volumes, period: 20 });
 
         const currentRSI = rsiValues[rsiValues.length - 1];
         const currentEMA50 = ema50Values[ema50Values.length - 1];
@@ -284,13 +311,24 @@ async function getMarketAnalysis(symbol) {
             recommendation,
             chartBuffer,
             rsi: currentRSI.toFixed(2),
+            rsiRaw: currentRSI,
             ema50: formatNumber(currentEMA50),
             ema200: formatNumber(currentEMA200),
+            ema50Raw: currentEMA50,
+            ema200Raw: currentEMA200,
+            ema50Values,
+            ema200Values,
+            rsiValues,
+            volumeEMAValues: volumeEmaValues,
             pricePHP: Number(currentPricePHP).toLocaleString('en-PH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
             priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             change: change24h,
             alert,
             trend,
+            ohlcBars,
+            atrValues,
+            volume: volumes[volumes.length - 1] || 0,
+            volumeEMA: volumeEmaValues[volumeEmaValues.length - 1] || 0,
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);
@@ -298,4 +336,4 @@ async function getMarketAnalysis(symbol) {
     }
 }
 
-module.exports = { getMarketAnalysis };
+module.exports = { getMarketAnalysis, getChartBuffer };
