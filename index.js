@@ -192,24 +192,24 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
 
       if (data.alert || forceNotify) {
         const message = [
-          `${data.sign}`,
-          `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📝 *REC:* _${data.recommendation}_`,
-          ``,
-          `📊 *INDICATORS*`,
-          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
-          `- RSI (14): ${data.rsi}`,
-          `- EMA (50): ₱${data.ema50}`,
-          `- EMA (200): ₱${data.ema200}`,
-          ``,
-          `💵 *PRICE*`,
-          `- PHP: ₱${data.pricePHP}`,
-          `- USDT: $${data.priceUSDT}`,
-          `🔁 24h Change: ${formatChange(data.change)}%`,
-          ``,
-          `━━━━━━━━━━━━`,
-          `© CoinsBot 2026 • Powered by Coins.ph API`,
-          `⚠️ Market data may be delayed or vary slightly.`
+          `${data.sign} *${coinLogo[data.symbol] || data.symbol}*`,
+          `🤖 _${data.recommendation}_`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `📊 *MARKET STRUCTURE*`,
+          `Trend: ${data.trend}`,
+          `RSI (14): ${data.rsi}`,
+          `EMA 50: ₱${data.ema50}`,
+          `EMA 200: ₱${data.ema200}`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `💰 *PRICE*`,
+          `PHP: ₱${data.pricePHP}`,
+          `USDT: $${data.priceUSDT}`,
+          `24H: ${formatChange(data.change)}`,
+          `🌐 [Live Chart](https://www.coins.ph/en-ph/trade/${data.symbol}/PHP)`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `⚡ _CoinsBot 2026_`,
+          `Powered by Coins.ph API`,
+          `⚠️ Market data may be delayed or slightly inaccurate`
         ].join('\n');
 
         await safeSendChartAndText(targetChatId, data.chartBuffer, message, {
@@ -274,24 +274,18 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     }
 
     const reportMessage = [
-        `${data.sign}`,
-          `*—— ${coinLogo[data.symbol] || data.symbol} ——*`,
-          `📝 *REC:* _${data.recommendation}_`,
-          ``,
-          `📊 *INDICATORS*`,
-          `- Trend: ${data.trend}`, // <<< ADD THIS LINE
-          `- RSI (14): ${data.rsi}`,
-          `- EMA (50): ₱${data.ema50}`,
-          `- EMA (200): ₱${data.ema200}`,
-          ``,
-          `💵 *PRICE*`,
-          `- PHP: ₱${data.pricePHP}`,
-          `- USDT: $${data.priceUSDT}`,
-          `🔁 24h Change: ${formatChange(data.change)}%`,
-          ``,
-          `━━━━━━━━━━━━`,
-          `© CoinsBot 2026 • Powered by Coins.ph API`,
-          `⚠️ Market data may be delayed or vary slightly.`
+        `${data.sign} *${coinLogo[data.symbol] || data.symbol}*`,
+        `🤖 _${data.recommendation}_`,
+        `━━━━━━━━━━━━━━━━━━━━━━`,
+        `💵 *PRICE*`,
+        `🌐 [Live Price](https://www.coins.ph/en-ph/trade/${data.symbol}/PHP)`,
+        `₱ PHP: ₱${data.pricePHP}`,
+        `$ USDT: $${data.priceUSDT}`,
+        `🔁 24H Change: ${formatChange(data.change)}`,
+        `━━━━━━━━━━━━━━━━━━━━━━`,
+        `⚡ _CoinsBot 2026_`,
+        `Powered by Coins.ph API`,
+        `⚠️ Market data may be delayed or slightly inaccurate`
         ].join('\n');
         
     await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
