@@ -9,179 +9,188 @@ function normalizeSymbol(rawSymbol) {
 }
 
 /**
- * Generates an Image Chart from QuickChart.io using our market arrays
- * @param {number[]} closes - Array of closing prices.
+ * Generates an Image Chart from QuickChart.io (Chart.js v4 + candlesticks).
+ * @param {{ t: number, o: number, h: number, l: number, c: number }[]} ohlcBars - Hourly OHLC (open time ms).
  * @param {number[]} ema50Values - Array of EMA 50 values.
  * @param {number[]} ema200Values - Array of EMA 200 values.
  * @param {number[]} rsiValues - Array of RSI values.
  * @param {string} pair - The full trading pair symbol (e.g., 'BTCUSDT').
  * @returns {Promise<Buffer|null>} A buffer containing the chart image, or null on error.
  */
-async function getChartBuffer(closes, ema50Values, ema200Values, rsiValues, pair) {
+async function getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, pair) {
     try {
-        // --- Align all indicator arrays to match the closing prices timeline ---
         const align = (values, length) =>
             values.length >= length
                 ? values.slice(-length)
                 : [...new Array(length - values.length).fill(null), ...values];
 
-        const alignedEma50 = align(ema50Values, closes.length);
-        const alignedEma200 = align(ema200Values, closes.length);
-        const alignedRsi = align(rsiValues, closes.length);
+        const n = ohlcBars.length;
+        const alignedEma50 = align(ema50Values, n);
+        const alignedEma200 = align(ema200Values, n);
+        const alignedRsi = align(rsiValues, n);
 
         const visiblePoints = 73; // Show 3 days of hourly data
-        const chartCloses = closes.slice(-visiblePoints);
+        const chartBars = ohlcBars.slice(-visiblePoints);
         const chartEma50 = alignedEma50.slice(-visiblePoints);
         const chartEma200 = alignedEma200.slice(-visiblePoints);
         const chartRsi = alignedRsi.slice(-visiblePoints);
-        
-        // --- MODIFIED: Generate real date/time labels for the PH timezone ---
-        const now = new Date();
-        const labels = Array.from({ length: chartCloses.length }, (_, i) => {
-            // The timestamp for the current data point in the loop
-            const pointDate = new Date(now.getTime() - (chartCloses.length - 1 - i) * 3600 * 1000);
-            // The timestamp for the previous data point, to check for day change
-            const prevPointDate = new Date(pointDate.getTime() - 3600 * 1000);
 
-            // Intl.DateTimeFormat is the modern way to handle timezones and locales
-            const timeFormatter = new Intl.DateTimeFormat('en-SG', { // en-SG provides a clean 24h format like 09:00
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-                timeZone: 'Asia/Manila'
-            });
-            const dateFormatter = new Intl.DateTimeFormat('en-US', {
-                month: 'numeric',
-                day: 'numeric',
-                timeZone: 'Asia/Manila'
+        const lineSeries = (ys) =>
+            chartBars.map((b, i) => {
+                const y = ys[i];
+                return {
+                    x: b.t,
+                    y: y != null && typeof y === 'number' && !Number.isNaN(y) ? y : null,
+                };
             });
 
-            // For the very last point, display 'NOW' for clarity
-            if (i === chartCloses.length - 1) {
-                return 'NOW';
-            }
-            
-            const currentDay = dateFormatter.format(pointDate);
-            const prevDay = dateFormatter.format(prevPointDate);
-
-            // If it's the first label in the chart, or if the day has changed
-            // since the previous label, display the date as well.
-            // Using a multi-line label array `[time, date]` for better readability.
-            if (i === 0 || currentDay !== prevDay) {
-                return [timeFormatter.format(pointDate), currentDay];
-            }
-
-            // Otherwise, just show the time
-            return timeFormatter.format(pointDate);
+        // Include wicks + bodies + EMAs for y-axis bounds (avoid QuickChart Infinity errors)
+        const validPrices = [];
+        chartBars.forEach((b, i) => {
+            [b.o, b.h, b.l, b.c].forEach((v) => {
+                if (typeof v === 'number' && !Number.isNaN(v)) validPrices.push(v);
+            });
+            [chartEma50[i], chartEma200[i]].forEach((v) => {
+                if (typeof v === 'number' && !Number.isNaN(v)) validPrices.push(v);
+            });
         });
-        // --- END OF MODIFICATION ---
-
-        // Safely extract min/max to prevent QuickChart "Infinity" 400 errors
-        const validPrices = [...chartCloses, ...chartEma50, ...chartEma200].filter(v => typeof v === 'number' && !isNaN(v));
         const minPrice = validPrices.length > 0 ? Math.min(...validPrices) : 0;
         const maxPrice = validPrices.length > 0 ? Math.max(...validPrices) : 100;
-        const priceRange = (maxPrice - minPrice) === 0 ? (maxPrice * 0.01 || 1) : (maxPrice - minPrice);
+        const priceRange = maxPrice - minPrice === 0 ? maxPrice * 0.01 || 1 : maxPrice - minPrice;
 
         const chartConfig = {
-            type: 'line',
             data: {
-                labels: labels,
                 datasets: [
                     {
-                        label: 'Price',
+                        type: 'candlestick',
+                        label: 'OHLC (1h)',
                         yAxisID: 'yPrice',
-                        data: chartCloses,
-                        borderColor: 'rgba(41, 98, 255, 1)',
-                        backgroundColor: 'rgba(41, 98, 255, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        pointRadius: 0
+                        data: chartBars.map((b) => ({
+                            x: b.t,
+                            o: b.o,
+                            h: b.h,
+                            l: b.l,
+                            c: b.c,
+                        })),
+                        borderColor: {
+                            up: '#26a69a',
+                            down: '#ef5350',
+                            unchanged: '#94a3b8',
+                        },
+                        backgroundColor: {
+                            up: 'rgba(38, 166, 154, 0.55)',
+                            down: 'rgba(239, 83, 80, 0.55)',
+                            unchanged: 'rgba(148, 163, 184, 0.45)',
+                        },
                     },
                     {
+                        type: 'line',
                         label: 'EMA (50)',
                         yAxisID: 'yPrice',
-                        data: chartEma50,
+                        data: lineSeries(chartEma50),
                         borderColor: '#FBBF24',
                         borderWidth: 1.5,
-                        fill: false,
                         pointRadius: 0,
                         spanGaps: true,
                     },
                     {
+                        type: 'line',
                         label: 'EMA (200)',
                         yAxisID: 'yPrice',
-                        data: chartEma200,
-                        borderColor: '#ef4444', // Light purple for EMA 200
+                        data: lineSeries(chartEma200),
+                        borderColor: '#ef4444',
                         borderWidth: 1.5,
-                        fill: false,
                         pointRadius: 0,
                         spanGaps: true,
                     },
                     {
+                        type: 'line',
                         label: 'RSI (14)',
                         yAxisID: 'yRsi',
-                        data: chartRsi,
-                        borderColor: '#10b981', // Rose color for RSI
+                        data: lineSeries(chartRsi),
+                        borderColor: '#10b981',
                         borderWidth: 1.5,
-                        fill: false,
                         pointRadius: 0,
-                        tension: 0.4
-                    }
-                ]
+                        spanGaps: true,
+                        tension: 0.4,
+                    },
+                ],
             },
             options: {
-                title: { 
-                    display: true, 
-                    text: `Coins.ph ${pair} Chart (Last ${visiblePoints-1} Hrs)`, 
-                    fontSize: 18,
-                    fontColor: '#EAECEF',
-                    fontFamily: 'sans-serif'
-                },
-                legend: { 
-                    position: 'bottom',
-                    labels: { fontColor: '#94A3B8', boxWidth: 15 }
-                },
                 scales: {
-                    xAxes: [{ 
-                        ticks: { maxTicksLimit: 6, fontColor: '#64748B' },
-                        gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
-                    }],
-                    yAxes: [
-                        { 
-                            id: 'yPrice',
-                            position: 'right',
-                            ticks: { 
-                                fontColor: '#64748B',
-                                min: minPrice - (priceRange * 0.733),
-                                max: maxPrice + (priceRange * 0.1)
-                            },
-                            gridLines: { color: 'rgba(255, 255, 255, 0.07)', zeroLineColor: 'rgba(255, 255, 255, 0.1)' }
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: { hour: 'MMM d HH:mm' },
                         },
-                        {
-                            id: 'yRsi',
-                            position: 'left',
-                            ticks: {
-                                min: 0,
-                                max: 250,
-                                callback: (value) => (value <= 100 ? value : null),
-                                fontColor: '#64748B'
-                            },
-                            gridLines: { drawOnChartArea: false }
-                        }
-                    ]
+                        ticks: { color: '#64748B', maxTicksLimit: 12 },
+                        grid: { color: 'rgba(255, 255, 255, 0.07)' },
+                    },
+                    yPrice: {
+                        position: 'right',
+                        min: minPrice - priceRange * 0.733,
+                        max: maxPrice + priceRange * 0.1,
+                        ticks: { color: '#64748B' },
+                        grid: { color: 'rgba(255, 255, 255, 0.07)' },
+                    },
+                    yRsi: {
+                        position: 'left',
+                        min: 0,
+                        max: 200,
+                        ticks: { color: '#64748B' },
+                        grid: { drawOnChartArea: false },
+                    },
                 },
-                annotation: {
-                    annotations: [
-                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 70, borderColor: '#ef4444', borderWidth: 1, borderDash: [4, 4] },
-                        { type: 'line', mode: 'horizontal', scaleID: 'yRsi', value: 30, borderColor: '#10b981', borderWidth: 1, borderDash: [4, 4] }
-                    ]
-                }
-            }
+                plugins: {
+                    title: {
+                        display: true,
+                        text: `Coins.ph ${pair} Chart (Last ${visiblePoints - 1} Hrs)`,
+                        color: '#EAECEF',
+                        font: { size: 18, family: 'sans-serif' },
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#94A3B8', boxWidth: 15 },
+                    },
+                    annotation: {
+                        annotations: {
+                            rsi70: {
+                                type: 'line',
+                                yMin: 70,
+                                yMax: 70,
+                                yScaleID: 'yRsi',
+                                borderColor: '#ef4444',
+                                borderWidth: 1,
+                                borderDash: [4, 4],
+                            },
+                            rsi30: {
+                                type: 'line',
+                                yMin: 30,
+                                yMax: 30,
+                                yScaleID: 'yRsi',
+                                borderColor: '#10b981',
+                                borderWidth: 1,
+                                borderDash: [4, 4],
+                            },
+                        },
+                    },
+                },
+            },
         };
 
-        const response = await axios.post('https://quickchart.io/chart', {
-            chart: chartConfig, width: 600, height: 400, backgroundColor: '#131722', format: 'png'
-        }, { responseType: 'arraybuffer' });
+        const response = await axios.post(
+            'https://quickchart.io/chart',
+            {
+                chart: chartConfig,
+                version: '4',
+                width: 600,
+                height: 400,
+                backgroundColor: '#131722',
+                format: 'png',
+            },
+            { responseType: 'arraybuffer' },
+        );
 
         return Buffer.from(response.data);
     } catch (error) {
@@ -207,7 +216,14 @@ async function getMarketAnalysis(symbol) {
         const usdtTickerUrl = `https://api.pro.coins.ph/openapi/v1/ticker/24hr?symbol=${usdtSymbol}`;
         const usdtTickerResp = await axios.get(usdtTickerUrl);
 
-        const closes = klineResp.data.map(d => parseFloat(d[4]));
+        const ohlcBars = klineResp.data.map((d) => ({
+            t: Number(d[0]),
+            o: parseFloat(d[1]),
+            h: parseFloat(d[2]),
+            l: parseFloat(d[3]),
+            c: parseFloat(d[4]),
+        }));
+        const closes = ohlcBars.map((b) => b.c);
         const currentPricePHP = parseFloat(tickerResp.data.lastPrice);
         const change24h = tickerResp.data.priceChangePercent;
 
@@ -251,14 +267,13 @@ async function getMarketAnalysis(symbol) {
             alert = true;
         }
         
-        // <<< ADD THIS BLOCK TO CALCULATE THE TREND LABEL
+        // Calculate the trend label
         let trend = "⚪ SIDEWAYS";
         if (isBullTrend) trend = "📈 UPTREND";
         else if (isBearTrend) trend = "📉 DOWNTREND";
-        // <<< END OF ADDED BLOCK
 
         // 6. Request chart image creation
-        const chartBuffer = await getChartBuffer(closes, ema50Values, ema200Values, rsiValues, normalizedSymbol);
+        const chartBuffer = await getChartBuffer(ohlcBars, ema50Values, ema200Values, rsiValues, normalizedSymbol);
 
         const formatNumber = (num) => Number(num).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -275,7 +290,7 @@ async function getMarketAnalysis(symbol) {
             priceUSDT: Number(currentPriceUSDT).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
             change: change24h,
             alert,
-            trend, // <<< ADD THIS PROPERTY TO THE RETURNED OBJECT
+            trend,
         };
     } catch (error) {
         console.error(`Indicator Error (${symbol}):`, error.message);
