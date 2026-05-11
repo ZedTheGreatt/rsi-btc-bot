@@ -30,7 +30,22 @@ const coinLogo = {
   BTC: '₿ BTC ₿',
   ETH: '⟠ ETH ⟠',
   SOL: '◎ SOL ◎',
-  XRP: '✕ XRP ✕'
+  XRP: '✕ XRP ✕',
+  USDC: '⬡ USDC ⬡',
+  USDT: '₮ USDT ₮'
+};
+
+const mainKeyboard = {
+  reply_markup: {
+    keyboard: [
+      ['📊 Now', '💲 Price'],
+      ['🪙 Coins', '🔄 Restart'],
+      ['⛔ Stop', '▶️ Start'],
+      ['ℹ️ Help']
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  }
 };
 
 // =========================
@@ -96,11 +111,11 @@ async function safeSendChartAndText(chatId, buffer, caption, options = {}) {
   try {
     if (buffer) {
       await bot.sendPhoto(chatId, buffer, {
-        ...options, 
+        ...options,
         caption: caption
       }, {
-        filename: 'chart.png', 
-        contentType: 'image/png' 
+        filename: 'chart.png',
+        contentType: 'image/png'
       });
     } else {
       // Graceful fallback to text formatting in case the image fails to generate
@@ -181,6 +196,7 @@ async function restartPolling(delay = reconnectDelay) {
     }
   }, delay);
 }
+
 // =========================
 // CORE UPDATE LOGIC
 // =========================
@@ -204,7 +220,7 @@ async function processUpdates(forceNotify = false, targetChatId = chatId) {
         const tp2 = fmt(priceNum * 1.05);
         const sl = fmt(priceNum * 0.98);
 
-        const { score, breakdown } = computeScore(data);
+        const { score } = computeScore(data);
         const { signal, bias } = determineSignal(data, score);
 
         const trade = getTradePlan(data.price_raw || priceNum, signal) || { entry: `₱${data.pricePHP}`, tp1: `₱${tp1}`, tp2: `₱${tp2}`, sl: `₱${sl}` };
@@ -254,8 +270,11 @@ bot.onText(/\/start$/, async msg => {
   isBotActive = true;
   await safeSend(
     msg.chat.id,
-    '🤖 *CoinsBot Activated*\nMonitoring every hour for strategic entry/exit zones.',
-    { parse_mode: 'Markdown' }
+    '🤖 *CoinsBot Activated*\nChoose an action below:',
+    {
+      parse_mode: 'Markdown',
+      ...mainKeyboard
+    }
   );
 });
 
@@ -299,20 +318,20 @@ bot.onText(/\/price (.+)/, async (msg, match) => {
     }
 
     const reportMessage = [
-        `*${data.sign} ${coinLogo[data.symbol] || data.symbol}*`,
-        `🤖 _${data.recommendation}_`,
-        `━━━━━━━━━━━━━━━━━━━━━━`,
-        `💵 *PRICE*`,
-        `🌐 [Live Price](https://www.coins.ph/en-ph/trade/${data.symbol}/PHP)`,
-        `₱ PHP: ₱${data.pricePHP}`,
-        `$ USDT: $${data.priceUSDT}`,
-        `🔁 24H Change: ${formatChange(data.change)}`,
-        `━━━━━━━━━━━━━━━━━━━━━━`,
-        `⚡ _CoinsBot 2026_`,
-        `Powered by Coins.ph API`,
-        `⚠️ Market data may be delayed or slightly inaccurate`
-        ].join('\n');
-        
+      `*${data.sign} ${coinLogo[data.symbol] || data.symbol}*`,
+      `🤖 _${data.recommendation}_`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `💵 *PRICE*`,
+      `🌐 [Live Price](https://www.coins.ph/en-ph/trade/${data.symbol}/PHP)`,
+      `₱ PHP: ₱${data.pricePHP}`,
+      `$ USDT: $${data.priceUSDT}`,
+      `🔁 24H Change: ${formatChange(data.change)}`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `⚡ _CoinsBot 2026_`,
+      `Powered by Coins.ph API`,
+      `⚠️ Market data may be delayed or slightly inaccurate`
+    ].join('\n');
+
     await safeSendChartAndText(msg.chat.id, data.chartBuffer, reportMessage, { parse_mode: 'Markdown' });
   } catch (err) {
     console.error(err.message);
@@ -333,8 +352,70 @@ bot.onText(/\/help|\/commands/, async msg => {
       '/coins - List tracked coins',
       '/price [coin] - Price check and visual Chart.'
     ].join('\n'),
-    { parse_mode: 'Markdown' }
+    {
+      parse_mode: 'Markdown',
+      ...mainKeyboard
+    }
   );
+});
+
+bot.on('message', async (msg) => {
+  const text = String(msg.text || '').replace(/\uFE0F/g, '').trim();
+  const chatId = msg.chat.id;
+
+  if (!text) return;
+
+  // ignore commands (so /price BTC still works)
+  if (text.startsWith('/')) return;
+
+  switch (text) {
+    case '📊 Now':
+      await safeSend(chatId, '📡 Fetching live market data...');
+      await processUpdates(true, chatId);
+      break;
+
+    case '💰 Price':
+      await safeSend(chatId, 'Send: /price BTC or ETH');
+      break;
+
+    case '📈 Coins':
+      await safeSend(
+        chatId,
+        `📍 *Tracking:*\n${formatCoinsList(coinList)}`,
+        { parse_mode: 'Markdown' }
+      );
+      break;
+
+    case '🔄 Restart':
+      await restartPolling(2000);
+      await safeSend(chatId, '🔄 Bot restarted');
+      break;
+
+    case '❌ Stop':
+      isBotActive = false;
+      await safeSend(chatId, '🛑 Bot paused');
+      break;
+
+    case '▶ Start':
+      isBotActive = true;
+      await safeSend(chatId, '▶️ Bot resumed');
+      break;
+
+    case 'ℹ Help':
+      await safeSend(
+        chatId,
+        [
+          '🤖 *CoinsBot Commands:*',
+          '📊 Now - instant analysis',
+          '💰 Price - /price BTC',
+          '📈 Coins - tracked coins',
+          '🔄 Restart - restart bot',
+          '❌ Stop - pause bot'
+        ].join('\n'),
+        { parse_mode: 'Markdown' }
+      );
+      break;
+  }
 });
 
 // =========================
