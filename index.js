@@ -38,8 +38,8 @@ const coinLogo = {
 const mainKeyboard = {
   reply_markup: {
     keyboard: [
-      ['📊 Now', '💲 Price'],
-      ['🪙 Coins', '🔄 Restart'],
+      ['📊 Now', '💰 Price'],
+      ['📈 Coins', '🔄 Restart'],
       ['⛔ Stop', '▶️ Start'],
       ['ℹ️ Help']
     ],
